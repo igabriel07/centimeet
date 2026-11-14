@@ -1,10 +1,11 @@
 /**
- * Δωρεάν πηγή για parking: OpenStreetMap μέσω Overpass API.
- * Συμπληρώνει το Google με πληροφορία δημόσιο/ιδιωτικό/υπόγειο.
+ * Δωρεάν πηγή OpenStreetMap μέσω Overpass API:
+ *  - parking (συμπληρώνει το Google με πληροφορία δημόσιο/ιδιωτικό/υπόγειο)
+ *  - μαγαζιά ως εφεδρική πηγή όταν εξαντληθεί το δωρεάν όριο του Google (χωρίς βαθμολογίες)
  */
-import type { LatLng, ParkingOption } from '@centimeet/shared';
+import type { Activity, LatLng, ParkingOption, Venue } from '@centimeet/shared';
 import { cached, geoKey, type Cache } from '../lib/cache';
-import { walkMinutes } from './google';
+import { walkMinutes } from '@centimeet/shared';
 
 const OVERPASS = 'https://overpass-api.de/api/interpreter';
 
@@ -85,4 +86,53 @@ export function mergeParking(lists: ParkingOption[][], limit = 5): ParkingOption
     if (out.length >= limit) break;
   }
   return out;
+}
+
+/** Ετικέτες OSM ανά δραστηριότητα */
+const OSM_FILTERS: Record<Activity, string[]> = {
+  coffee: ['[amenity=cafe]'],
+  food: ['[amenity=restaurant]', '[amenity=fast_food]'],
+  drinks: ['[amenity=bar]', '[amenity=pub]'],
+  cinema: ['[amenity=cinema]'],
+  dessert: ['[shop=pastry]', '[amenity=ice_cream]', '[shop=confectionery]'],
+  brunch: ['[amenity=cafe]', '[amenity=restaurant]'],
+};
+
+/** Μαγαζιά από OSM (εφεδρικά): όνομα, θέση, τηλέφωνο — χωρίς βαθμολογίες/ωράρια */
+export async function osmVenues(
+  center: LatLng,
+  activity: Activity,
+  radiusM: number,
+  cache: Cache,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Venue[]> {
+  const key = `venues:osm:${activity}:${geoKey(center.lat, center.lng)}:${radiusM}`;
+  return cached(cache, key, 24 * 60 * 60, async () => {
+    const around = `(around:${radiusM},${center.lat},${center.lng})`;
+    const q = `[out:json][timeout:10];(${OSM_FILTERS[activity].map((f) => `nwr${around}${f}[name];`).join('')});out center 30;`;
+    const res = await fetchImpl(OVERPASS, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'CentiMeet/0.1' },
+      body: `data=${encodeURIComponent(q)}`,
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { elements?: OsmEl[] };
+    return (data.elements ?? [])
+      .map((e): Venue | null => {
+        const lat = e.lat ?? e.center?.lat;
+        const lng = e.lon ?? e.center?.lon;
+        const t = e.tags ?? {};
+        if (lat == null || lng == null || !t.name) return null;
+        const street = [t['addr:street'], t['addr:housenumber']].filter(Boolean).join(' ');
+        return {
+          id: `osm:${e.type}/${e.id}`,
+          name: t['name:el'] ?? t.name,
+          location: { lat, lng },
+          address: street || undefined,
+          phone: t.phone ?? t['contact:phone'],
+          source: 'osm',
+        };
+      })
+      .filter((v): v is Venue => v !== null);
+  });
 }

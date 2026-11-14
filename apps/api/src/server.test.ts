@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { SuggestionsResponse, VenuePlanResponse } from '@centimeet/shared';
+import type { AreaVenuesResponse, SuggestionsResponse, VenuePlanResponse } from '@centimeet/shared';
 import { loadEnv } from './env';
 import { buildServer } from './server';
 import { GoogleProvider, MATRIX_MAX_ELEMENTS, mergeWalkSteps } from './providers/google';
@@ -23,10 +23,10 @@ describe('API (mock providers)', () => {
 
   it('GET /health', async () => {
     const res = await app.inject({ method: 'GET', url: '/health' });
-    expect(res.json()).toEqual({ ok: true, mock: true });
+    expect(res.json()).toEqual({ ok: true, mock: true, costMode: 'lean' });
   });
 
-  it('POST /v1/suggestions επιστρέφει κύριες + εναλλακτικές προτάσεις', async () => {
+  it('POST /v1/suggestions (lean): κύριες προτάσεις, εναλλακτικές περιοχές χωρίς μαγαζιά', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/suggestions',
@@ -35,13 +35,52 @@ describe('API (mock providers)', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json<SuggestionsResponse>();
     expect(body.areas[0]!.isPrimary).toBe(true);
+    expect(body.areas[0]!.hasVenues).toBe(true);
     expect(body.areas.length).toBeGreaterThan(1);
+    expect(body.areas.slice(1).every((a) => !a.hasVenues && a.travel.length === 5)).toBe(true);
     expect(body.primary.length).toBeGreaterThan(0);
-    expect(body.alternatives.length).toBeGreaterThan(0);
+    expect(body.alternatives).toEqual([]);
     for (const s of body.primary) expect(s.travel).toHaveLength(5);
     // ταξινόμηση κατά score
     const scores = body.primary.map((s) => s.score);
     expect([...scores].sort((a, b) => b - a)).toEqual(scores);
+  });
+
+  it('POST /v1/area-venues: «Δες μαγαζιά εδώ» για εναλλακτική περιοχή', async () => {
+    const s = await app.inject({ method: 'POST', url: '/v1/suggestions', payload: { city: 'athens', activity: 'coffee', participants } });
+    const body = s.json<SuggestionsResponse>();
+    const alt = body.areas[1]!;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/area-venues',
+      payload: { city: 'athens', activity: 'coffee', participants, area: alt, excludeIds: body.primary.map((v) => v.venue.id) },
+    });
+    expect(res.statusCode).toBe(200);
+    const out = res.json<AreaVenuesResponse>();
+    expect(out.area.hasVenues).toBe(true);
+    expect(out.area.radiusM).toBeGreaterThan(0);
+    expect(out.venues.length).toBeGreaterThan(0);
+    expect(out.venues.every((v) => v.areaId === alt.id)).toBe(true);
+    const primaryIds = new Set(body.primary.map((v) => v.venue.id));
+    expect(out.venues.some((v) => primaryIds.has(v.venue.id))).toBe(false);
+  });
+
+  it('growth: εναλλακτικές με μαγαζιά αμέσως', async () => {
+    const growth = buildServer(loadEnv({ USE_MOCK_PROVIDERS: 'true', GEOCODER: 'mock', COST_MODE: 'growth' } as NodeJS.ProcessEnv));
+    const res = await growth.inject({ method: 'POST', url: '/v1/suggestions', payload: { city: 'athens', activity: 'coffee', participants } });
+    const body = res.json<SuggestionsResponse>();
+    expect(body.alternatives.length).toBeGreaterThan(0);
+    expect(body.areas.every((a) => a.hasVenues)).toBe(true);
+  });
+
+  it('όριο αναζητήσεων ανά χρήστη την ημέρα → 429 με φιλικό μήνυμα', async () => {
+    const limited = buildServer(loadEnv({ USE_MOCK_PROVIDERS: 'true', GEOCODER: 'mock', USER_DAILY_SEARCHES: '2' } as NodeJS.ProcessEnv));
+    const send = () => limited.inject({ method: 'POST', url: '/v1/suggestions', payload: { city: 'athens', activity: 'coffee', participants } });
+    expect((await send()).statusCode).toBe(200);
+    expect((await send()).statusCode).toBe(200);
+    const third = await send();
+    expect(third.statusCode).toBe(429);
+    expect(third.json().message).toContain('όριο');
   });
 
   it('απορρίπτει αφετηρία εκτός πόλης', async () => {
@@ -112,6 +151,73 @@ describe('GoogleProvider', () => {
     expect(calls.every((c) => c <= MATRIX_MAX_ELEMENTS)).toBe(true);
     expect(m).toHaveLength(6);
     expect(m[5]![39]).toEqual({ durationMin: 6, distanceKm: 39 });
+  });
+
+  /** Καταγράφει τα requests προς το Google και απαντά με το `reply` */
+  const recorder = (reply: unknown) => {
+    const calls: { url: string; headers: Record<string, string>; body: Record<string, unknown> }[] = [];
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      calls.push({ url, headers: init.headers as Record<string, string>, body: init.body ? JSON.parse(String(init.body)) : {} });
+      return new Response(JSON.stringify(reply), { status: 200 });
+    }) as unknown as typeof fetch;
+    return { calls, g: new GoogleProvider('k', new MemoryCache(), fetchImpl) };
+  };
+  const inTwoDays = new Date(Date.now() + 2 * 24 * 3600_000);
+  const A = { lat: 37.97, lng: 23.73 };
+  const B = { lat: 38.07, lng: 23.81 };
+
+  it('χρονισμός & κίνηση ανά μέσο (καθορίζει και τη χρέωση)', () => {
+    const { g } = recorder([]);
+    expect(g.timing('car', { departAt: inTwoDays })).toEqual({
+      travelMode: 'DRIVE',
+      routingPreference: 'TRAFFIC_AWARE_OPTIMAL',
+      trafficModel: 'PESSIMISTIC',
+      departureTime: inTwoDays.toISOString(),
+    });
+    expect(g.timing('car')).toEqual({ travelMode: 'DRIVE', routingPreference: 'TRAFFIC_UNAWARE' });
+    expect(g.timing('motorbike', { departAt: inTwoDays }).travelMode).toBe('DRIVE'); // όχι TWO_WHEELER (Enterprise)
+    expect(g.timing('transit', { arriveBy: inTwoDays })).toEqual({ travelMode: 'TRANSIT', arrivalTime: inTwoDays.toISOString() });
+    expect(g.timing('walk', { departAt: inTwoDays })).toEqual({ travelMode: 'WALK' });
+    // Ώρα στο παρελθόν → σαν «τώρα» (το Google απορρίπτει παλιές ώρες)
+    expect(g.timing('car', { departAt: new Date(Date.now() - 3600_000) })).toEqual({ travelMode: 'DRIVE', routingPreference: 'TRAFFIC_UNAWARE' });
+  });
+
+  it('αναζήτηση μαγαζιών: σωστά πεδία, ακτίνα, και αντιστοίχιση ωραρίου/τηλεφώνου/παρέας', async () => {
+    const { g, calls } = recorder({
+      places: [
+        {
+          id: 'ChIJ1',
+          displayName: { text: 'Καφέ Α' },
+          location: { latitude: 37.971, longitude: 23.731 },
+          rating: 4.6,
+          userRatingCount: 1200,
+          priceLevel: 'PRICE_LEVEL_MODERATE',
+          regularOpeningHours: { periods: [{ open: { day: 1, hour: 8, minute: 0 }, close: { day: 1, hour: 22, minute: 0 } }] },
+          businessStatus: 'OPERATIONAL',
+          nationalPhoneNumber: '210 1234567',
+          reservable: true,
+          goodForGroups: false,
+        },
+      ],
+    });
+    const [v] = await g.searchVenues(A, 'coffee', 300, 20);
+    const mask = calls[0]!.headers['X-Goog-FieldMask']!;
+    for (const f of ['rating', 'userRatingCount', 'regularOpeningHours.periods', 'nationalPhoneNumber', 'goodForGroups', 'reservable', 'businessStatus']) {
+      expect(mask).toContain(`places.${f}`);
+    }
+    expect(calls[0]!.body).toMatchObject({ includedTypes: ['cafe', 'coffee_shop'], locationRestriction: { circle: { radius: 300 } } });
+    expect(v).toMatchObject({ id: 'ChIJ1', rating: 4.6, ratingCount: 1200, priceLevel: 2, phone: '210 1234567', reservable: true, goodForGroups: false });
+    expect(v!.openingPeriods).toHaveLength(1);
+  });
+
+  it('διαδρομή αυτοκινήτου: ζητά διόδια και τα διαβάζει σε €', async () => {
+    const { g, calls } = recorder({
+      routes: [{ duration: '1500s', distanceMeters: 18000, travelAdvisory: { tollInfo: { estimatedPrice: [{ currencyCode: 'EUR', units: '2', nanos: 800000000 }] } } }],
+    });
+    const r = await g.route(B, A, 'car', { departAt: inTwoDays });
+    expect(calls[0]!.body.extraComputations).toEqual(['TOLLS']);
+    expect(calls[0]!.headers['X-Goog-FieldMask']).toContain('routes.travelAdvisory.tollInfo');
+    expect(r).toMatchObject({ durationMin: 25, distanceKm: 18, tollEur: 2.8 });
   });
 
   it('ενώνει διαδοχικά βήματα περπατήματος', () => {

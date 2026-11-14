@@ -5,20 +5,28 @@
  *    Επαληθεύστε τες πριν το launch (ΟΑΣΑ, ΟΑΣΘ, ταρίφα ταξί) και, ιδανικά,
  *    μεταφέρετέ τες σε πίνακα της βάσης ώστε να αλλάζουν χωρίς νέο build.
  */
-import type { CityId, LatLng } from './types';
+import { haversineKm } from './geo';
+import type { CityId, LatLng, TransportMode } from './types';
 
 export type TransitHub = { id: string; label: string; location: LatLng };
+
+/** Ζώνη όπου το parking θέλει περισσότερο ψάξιμο (π.χ. κέντρο) */
+export type ParkingZone = { label: string; center: LatLng; radiusKm: number; carMin: number; motorbikeMin: number };
 
 export type CityConfig = {
   id: CityId;
   label: string;
   center: LatLng;
+  /** Ζώνη ώρας (για ωράρια μαγαζιών και ώρες αιχμής) */
+  timeZone: string;
   /** Ακτίνα (km) εντός της οποίας δεχόμαστε αφετηρίες */
   serviceRadiusKm: number;
   /** Γνωστοί κόμβοι – χρησιμοποιούνται ως «εναλλακτικές περιοχές» */
   hubs: TransitHub[];
   transit: { singleTicketEur: number; note: string };
   taxi: { startEur: number; perKmEur: number; perHourWaitingEur: number; minimumEur: number };
+  /** Εκτίμηση λεπτών για εύρεση parking (προστίθεται στον χρόνο οδηγών). ⚠️ Ενδεικτικά. */
+  parking: { zones: ParkingZone[]; carMin: number; motorbikeMin: number };
 };
 
 export const CITY_CONFIG: Record<CityId, CityConfig> = {
@@ -26,6 +34,7 @@ export const CITY_CONFIG: Record<CityId, CityConfig> = {
     id: 'athens',
     label: 'Αθήνα',
     center: { lat: 37.9838, lng: 23.7275 },
+    timeZone: 'Europe/Athens',
     serviceRadiusKm: 35,
     hubs: [
       { id: 'syntagma', label: 'Σύνταγμα', location: { lat: 37.9755, lng: 23.7348 } },
@@ -45,11 +54,21 @@ export const CITY_CONFIG: Record<CityId, CityConfig> = {
     ],
     transit: { singleTicketEur: 1.2, note: 'Ενιαίο εισιτήριο ΟΑΣΑ 90′ (επαληθεύστε)' },
     taxi: { startEur: 1.85, perKmEur: 0.9, perHourWaitingEur: 12, minimumEur: 4.0 },
+    parking: {
+      zones: [
+        { label: 'Κέντρο', center: { lat: 37.9785, lng: 23.7305 }, radiusKm: 2.5, carMin: 12, motorbikeMin: 3 },
+        { label: 'Κηφισιά', center: { lat: 38.0736, lng: 23.8114 }, radiusKm: 1.0, carMin: 8, motorbikeMin: 2 },
+        { label: 'Γλυφάδα', center: { lat: 37.8636, lng: 23.7536 }, radiusKm: 1.0, carMin: 8, motorbikeMin: 2 },
+      ],
+      carMin: 5,
+      motorbikeMin: 1,
+    },
   },
   thessaloniki: {
     id: 'thessaloniki',
     label: 'Θεσσαλονίκη',
     center: { lat: 40.6401, lng: 22.9444 },
+    timeZone: 'Europe/Athens',
     serviceRadiusKm: 25,
     hubs: [
       { id: 'aristotelous', label: 'Πλ. Αριστοτέλους', location: { lat: 40.6325, lng: 22.9408 } },
@@ -63,5 +82,19 @@ export const CITY_CONFIG: Record<CityId, CityConfig> = {
     ],
     transit: { singleTicketEur: 1.0, note: 'Εισιτήριο ΟΑΣΘ (επαληθεύστε)' },
     taxi: { startEur: 1.85, perKmEur: 0.9, perHourWaitingEur: 12, minimumEur: 4.0 },
+    parking: {
+      zones: [{ label: 'Κέντρο', center: { lat: 40.6345, lng: 22.9425 }, radiusKm: 2.0, carMin: 12, motorbikeMin: 3 }],
+      carMin: 5,
+      motorbikeMin: 1,
+    },
   },
 };
+
+/** Λεπτά εύρεσης parking στο σημείο για αυτό το μέσο (0 για ταξί/πόδια/συγκοινωνίες) */
+export function parkingSearchMinutes(city: CityId, mode: TransportMode, at: LatLng): number {
+  if (mode !== 'car' && mode !== 'motorbike') return 0;
+  const p = CITY_CONFIG[city].parking;
+  const zone = p.zones.find((z) => haversineKm(z.center, at) <= z.radiusKm);
+  if (mode === 'car') return zone?.carMin ?? p.carMin;
+  return zone?.motorbikeMin ?? p.motorbikeMin;
+}

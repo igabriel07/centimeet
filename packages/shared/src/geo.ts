@@ -42,3 +42,20 @@ export function weightedCentroid(points: { origin: LatLng; mode: TransportMode }
   }
   return { lat: lat / wSum, lng: lng / wSum };
 }
+
+/** Σταθερή επιβάρυνση (λεπτά) ανά μέσο: αναμονή, πρόσβαση σε στάση κ.λπ. */
+const MODE_OVERHEAD_MIN: Record<TransportMode, number> = { transit: 8, car: 4, taxi: 4, motorbike: 2, bike: 1, walk: 0 };
+
+/**
+ * Χονδρική εκτίμηση χρόνου (λεπτά) χωρίς API: ευθεία απόσταση × 1.3 (δρόμοι).
+ * Χρησιμοποιείται για το προ-φιλτράρισμα υποψήφιων σημείων και στο mock.
+ */
+export function estimateMinutes(a: LatLng, b: LatLng, mode: TransportMode): { durationMin: number; distanceKm: number } {
+  const distanceKm = haversineKm(a, b) * 1.3;
+  return { durationMin: (distanceKm / URBAN_SPEED_KMH[mode]) * 60 + MODE_OVERHEAD_MIN[mode], distanceKm };
+}
+
+/** Περπάτημα: ευθεία απόσταση × 1.3 (δρόμοι) με 4.8 km/h */
+export function walkMinutes(a: LatLng, b: LatLng): number {
+  return Math.max(1, Math.round(((haversineKm(a, b) * 1.3) / 4.8) * 60));
+}

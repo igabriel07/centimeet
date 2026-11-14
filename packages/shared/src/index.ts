@@ -5,3 +5,6 @@ export * from './fairness';
 export * from './cities';
 export * from './cost';
 export * from './share';
+export * from './outings';
+export * from './opening';
+export * from './crowd';

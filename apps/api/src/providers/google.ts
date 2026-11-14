@@ -3,9 +3,10 @@
  * Τα κλειδιά μένουν ΜΟΝΟ στο backend.
  */
 import {
-  haversineKm,
+  walkMinutes,
   type Activity,
   type LatLng,
+  type OpeningPeriod,
   type ParkingOption,
   type PlaceSuggestion,
   type ResolvedPlace,
@@ -14,7 +15,9 @@ import {
   type Venue,
 } from '@centimeet/shared';
 import { cached, geoKey, type Cache } from '../lib/cache';
-import type { MatrixCell, PlacesProvider, RoutingProvider } from './types';
+import type { MatrixCell, PlacesProvider, RouteTiming, RoutingProvider } from './types';
+
+export { walkMinutes };
 
 const PLACES = 'https://places.googleapis.com/v1';
 const ROUTES = 'https://routes.googleapis.com';
@@ -28,10 +31,14 @@ export const ACTIVITY_TYPES: Record<Activity, string[]> = {
   brunch: ['brunch_restaurant', 'breakfast_restaurant', 'cafe'],
 };
 
+/**
+ * Η μηχανή δρομολογείται ως αυτοκίνητο (ο κινητήρας εφαρμόζει μικρότερο χρόνο):
+ * το TWO_WHEELER χρεώνεται ως Enterprise ($15/1000 αντί $10).
+ */
 const TRAVEL_MODE: Record<TransportMode, string> = {
   car: 'DRIVE',
   taxi: 'DRIVE',
-  motorbike: 'TWO_WHEELER',
+  motorbike: 'DRIVE',
   transit: 'TRANSIT',
   walk: 'WALK',
   bike: 'BICYCLE',
@@ -59,7 +66,11 @@ type GPlace = {
   rating?: number;
   userRatingCount?: number;
   priceLevel?: string;
-  currentOpeningHours?: { openNow?: boolean };
+  regularOpeningHours?: { periods?: OpeningPeriod[] };
+  businessStatus?: Venue['businessStatus'];
+  nationalPhoneNumber?: string;
+  reservable?: boolean;
+  goodForGroups?: boolean;
 };
 
 const toVenue = (p: GPlace): Venue => ({
@@ -70,11 +81,31 @@ const toVenue = (p: GPlace): Venue => ({
   rating: p.rating,
   ratingCount: p.userRatingCount,
   priceLevel: p.priceLevel ? PRICE_LEVEL[p.priceLevel] : undefined,
-  openNow: p.currentOpeningHours?.openNow,
+  openingPeriods: p.regularOpeningHours?.periods,
+  businessStatus: p.businessStatus,
+  phone: p.nationalPhoneNumber,
+  reservable: p.reservable,
+  goodForGroups: p.goodForGroups,
 });
 
-const VENUE_FIELDS =
-  'id,displayName,formattedAddress,location,rating,userRatingCount,priceLevel,currentOpeningHours.openNow';
+/**
+ * Πεδία μαγαζιού. ⚠️ Καθορίζουν τη χρέωση: rating/userRatingCount/ωράριο/τηλέφωνο = Enterprise,
+ * reservable/goodForGroups = Enterprise + Atmosphere ($40/1000 κλήσεις, 1.000 δωρεάν/μήνα).
+ */
+export const VENUE_FIELDS = [
+  'id',
+  'displayName',
+  'formattedAddress',
+  'location',
+  'rating',
+  'userRatingCount',
+  'priceLevel',
+  'regularOpeningHours.periods',
+  'businessStatus',
+  'nationalPhoneNumber',
+  'reservable',
+  'goodForGroups',
+].join(',');
 
 export class GoogleProvider implements PlacesProvider, RoutingProvider {
   constructor(
@@ -115,8 +146,16 @@ export class GoogleProvider implements PlacesProvider, RoutingProvider {
           locationRestriction: { circle: { center: { latitude: center.lat, longitude: center.lng }, radius: radiusM } },
         },
       );
-      return (data.places ?? []).map(toVenue);
+      const venues = (data.places ?? []).map(toVenue);
+      // Το πλάνο (getVenue) βρίσκει το μαγαζί εδώ χωρίς νέα χρέωση Place Details
+      await Promise.all(venues.map((v) => this.cache.set(`venue:${v.id}`, v, 60 * 60)));
+      return venues;
     });
+  }
+
+  /** Είναι το μαγαζί ήδη στην cache (άρα getVenue δεν θα χρεώσει); */
+  async hasCachedVenue(placeId: string): Promise<boolean> {
+    return (await this.cache.get(`venue:${placeId}`)) !== undefined;
   }
 
   async getVenue(placeId: string): Promise<Venue | null> {
@@ -229,18 +268,11 @@ export class GoogleProvider implements PlacesProvider, RoutingProvider {
 
   // ---------- Routes ----------
 
-  private timing(mode: TransportMode, departAt?: Date) {
-    const travelMode = TRAVEL_MODE[mode];
-    const future = departAt && departAt.getTime() > Date.now() + 60_000 ? departAt.toISOString() : undefined;
-    const drive = travelMode === 'DRIVE' || travelMode === 'TWO_WHEELER';
-    return {
-      travelMode,
-      ...(drive ? { routingPreference: 'TRAFFIC_AWARE' } : {}),
-      ...(future ? { departureTime: future } : {}),
-    };
+  timing(mode: TransportMode, t?: RouteTiming): Record<string, string> {
+    return googleTiming(mode, t);
   }
 
-  async matrix(origins: LatLng[], destinations: LatLng[], mode: TransportMode, departAt?: Date): Promise<MatrixCell[][]> {
+  async matrix(origins: LatLng[], destinations: LatLng[], mode: TransportMode, timing?: RouteTiming): Promise<MatrixCell[][]> {
     const out: MatrixCell[][] = origins.map(() => destinations.map(() => null));
     if (origins.length === 0 || destinations.length === 0) return out;
 
@@ -248,14 +280,15 @@ export class GoogleProvider implements PlacesProvider, RoutingProvider {
     const chunkSize = Math.max(1, Math.floor(MATRIX_MAX_ELEMENTS / origins.length));
     for (let start = 0; start < destinations.length; start += chunkSize) {
       const chunk = destinations.slice(start, start + chunkSize);
-      const key = `matrix:${mode}:${departAt?.toISOString().slice(0, 15) ?? 'now'}:${origins.map((o) => geoKey(o.lat, o.lng)).join('|')}>${chunk.map((d) => geoKey(d.lat, d.lng)).join('|')}`;
+      const when = timing?.arriveBy ? `a${timing.arriveBy.toISOString().slice(0, 15)}` : timing?.departAt ? `d${timing.departAt.toISOString().slice(0, 15)}` : 'now';
+      const key = `matrix:${TRAVEL_MODE[mode]}:${when}:${origins.map((o) => geoKey(o.lat, o.lng)).join('|')}>${chunk.map((d) => geoKey(d.lat, d.lng)).join('|')}`;
       const cells = await cached(this.cache, key, 10 * 60, async () => {
         const els = await this.call<
           { originIndex?: number; destinationIndex?: number; condition?: string; duration?: string; distanceMeters?: number }[]
         >(`${ROUTES}/distanceMatrix/v2:computeRouteMatrix`, 'originIndex,destinationIndex,duration,distanceMeters,condition', {
           origins: origins.map((o) => ({ waypoint: { location: toLatLngJson(o) } })),
           destinations: chunk.map((d) => ({ waypoint: { location: toLatLngJson(d) } })),
-          ...this.timing(mode, departAt),
+          ...this.timing(mode, timing),
           languageCode: 'el',
         });
         return els.map((e) => ({
@@ -272,7 +305,7 @@ export class GoogleProvider implements PlacesProvider, RoutingProvider {
     return out;
   }
 
-  async route(origin: LatLng, destination: LatLng, mode: TransportMode, departAt?: Date) {
+  async route(origin: LatLng, destination: LatLng, mode: TransportMode, timing?: RouteTiming) {
     type GStep = {
       travelMode?: string;
       staticDuration?: string;
@@ -281,13 +314,30 @@ export class GoogleProvider implements PlacesProvider, RoutingProvider {
         transitLine?: { nameShort?: string; name?: string; vehicle?: { type?: string } };
       };
     };
-    const data = await this.call<{ routes?: { duration?: string; distanceMeters?: number; legs?: { steps?: GStep[] }[] }[] }>(
+    const drive = TRAVEL_MODE[mode] === 'DRIVE';
+    type Money = { currencyCode?: string; units?: string; nanos?: number };
+    const data = await this.call<{
+      routes?: {
+        duration?: string;
+        distanceMeters?: number;
+        legs?: { steps?: GStep[] }[];
+        travelAdvisory?: { tollInfo?: { estimatedPrice?: Money[] } };
+      }[];
+    }>(
       `${ROUTES}/directions/v2:computeRoutes`,
-      'routes.duration,routes.distanceMeters,routes.legs.steps.travelMode,routes.legs.steps.staticDuration,routes.legs.steps.transitDetails',
+      [
+        'routes.duration',
+        'routes.distanceMeters',
+        'routes.legs.steps.travelMode',
+        'routes.legs.steps.staticDuration',
+        'routes.legs.steps.transitDetails',
+        ...(drive ? ['routes.travelAdvisory.tollInfo'] : []),
+      ].join(','),
       {
         origin: { location: toLatLngJson(origin) },
         destination: { location: toLatLngJson(destination) },
-        ...this.timing(mode, departAt),
+        ...this.timing(mode, timing),
+        ...(drive ? { extraComputations: ['TOLLS'] } : {}),
         languageCode: 'el',
         units: 'METRIC',
       },
@@ -310,8 +360,44 @@ export class GoogleProvider implements PlacesProvider, RoutingProvider {
         }),
       );
     }
-    return { durationMin: Math.round(parseDurationMin(r.duration)), distanceKm: (r.distanceMeters ?? 0) / 1000, steps };
+    const eur = r.travelAdvisory?.tollInfo?.estimatedPrice?.find((m) => m.currencyCode === 'EUR');
+    const tollEur = eur ? Math.round((Number(eur.units ?? 0) + (eur.nanos ?? 0) / 1e9) * 100) / 100 : undefined;
+    return {
+      durationMin: Math.round(parseDurationMin(r.duration)),
+      distanceKm: (r.distanceMeters ?? 0) / 1000,
+      steps,
+      tollEur: tollEur || undefined,
+    };
   }
+}
+
+/**
+ * Χρονισμός & κίνηση ανά μέσο (καθορίζει και τη χρέωση):
+ *  - οχήματα με μελλοντική ώρα → TRAFFIC_AWARE_OPTIMAL + PESSIMISTIC (Pro): κανείς να μην αργήσει
+ *  - οχήματα χωρίς ώρα → TRAFFIC_UNAWARE (Essentials)
+ *  - συγκοινωνίες → arrivalTime (ώρα συνάντησης) ή departureTime
+ *  - πόδια/ποδήλατο → χωρίς κίνηση (Essentials)
+ */
+export function googleTiming(mode: TransportMode, t?: RouteTiming, now = Date.now()): Record<string, string> {
+  const travelMode = TRAVEL_MODE[mode];
+  const future = (d?: Date) => (d && d.getTime() > now + 60_000 ? d.toISOString() : undefined);
+  if (travelMode === 'TRANSIT') {
+    const arrivalTime = future(t?.arriveBy);
+    const departureTime = future(t?.departAt);
+    return { travelMode, ...(arrivalTime ? { arrivalTime } : departureTime ? { departureTime } : {}) };
+  }
+  if (travelMode === 'DRIVE') {
+    const departureTime = future(t?.departAt);
+    return departureTime
+      ? { travelMode, routingPreference: 'TRAFFIC_AWARE_OPTIMAL', trafficModel: 'PESSIMISTIC', departureTime }
+      : { travelMode, routingPreference: 'TRAFFIC_UNAWARE' };
+  }
+  return { travelMode };
+}
+
+/** Pro (με κίνηση) ή Essentials — για τον μετρητή χρήσης */
+export function routesTier(mode: TransportMode, t?: RouteTiming): 'pro' | 'essentials' {
+  return googleTiming(mode, t).routingPreference === 'TRAFFIC_AWARE_OPTIMAL' ? 'pro' : 'essentials';
 }
 
 function vehicleKind(type?: string): TransitStep['kind'] {
@@ -347,7 +433,3 @@ export function mergeWalkSteps(steps: TransitStep[]): TransitStep[] {
   return out;
 }
 
-/** Περπάτημα: ευθεία απόσταση × 1.3 (δρόμοι) με 4.8 km/h */
-export function walkMinutes(a: LatLng, b: LatLng): number {
-  return Math.max(1, Math.round(((haversineKm(a, b) * 1.3) / 4.8) * 60));
-}

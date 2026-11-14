@@ -19,6 +19,13 @@ export type Participant = {
   mode: TransportMode;
 };
 
+/** Διάστημα λειτουργίας όπως το δίνει το Google (day: 0 = Κυριακή) */
+export type OpeningPeriod = {
+  open: { day: number; hour: number; minute: number };
+  /** Λείπει όταν το μαγαζί είναι ανοιχτό 24/7 */
+  close?: { day: number; hour: number; minute: number };
+};
+
 export type Venue = {
   id: string; // Google place id
   name: string;
@@ -27,7 +34,16 @@ export type Venue = {
   rating?: number;
   ratingCount?: number;
   priceLevel?: number; // 0-4
-  openNow?: boolean;
+  /** Εβδομαδιαίο ωράριο (για έλεγχο «ανοιχτό την ώρα της συνάντησης») */
+  openingPeriods?: OpeningPeriod[];
+  businessStatus?: 'OPERATIONAL' | 'CLOSED_TEMPORARILY' | 'CLOSED_PERMANENTLY';
+  phone?: string;
+  /** Δέχεται κρατήσεις */
+  reservable?: boolean;
+  /** Κατάλληλο για παρέες */
+  goodForGroups?: boolean;
+  /** 'osm' = εφεδρική πηγή χωρίς βαθμολογίες (όταν εξαντληθεί το δωρεάν όριο Google) */
+  source?: 'google' | 'osm';
 };
 
 export type TravelEstimate = {
@@ -37,15 +53,32 @@ export type TravelEstimate = {
   costEur: number;
 };
 
+export type CrowdReason = 'peak_time' | 'very_popular' | 'large_group' | 'not_group_friendly';
+
+/** Εκτίμηση (όχι μέτρηση) ότι το μαγαζί μπορεί να είναι γεμάτο για τόσα άτομα */
+export type CrowdHint = {
+  /** 0-1 */
+  risk: number;
+  /** Να προτείνουμε τηλέφωνο για τραπέζι */
+  callAhead: boolean;
+  reasons: CrowdReason[];
+};
+
 export type ScoredVenue = {
   venue: Venue;
-  /** 0-100, μεγαλύτερο = καλύτερο */
+  /** 0-100, σχετικό με τα υπόλοιπα της ίδιας περιοχής (100 = το καλύτερο) */
   score: number;
+  /** Σταθμισμένη βαθμολογία (Bayesian) που χρησιμοποιήθηκε στην κατάταξη */
+  quality: number;
+  /** Απόσταση από το σημείο συνάντησης (m) */
+  distanceM: number;
+  crowd?: CrowdHint;
   maxMin: number;
   minMin: number;
   avgMin: number;
   /** Διαφορά πιο αργού – πιο γρήγορου (λεπτά) */
   spreadMin: number;
+  /** Εκτίμηση: χρόνος ως το σημείο + περπάτημα ως το μαγαζί */
   travel: TravelEstimate[];
   /** Σε ποια υποψήφια περιοχή ανήκει */
   areaId: string;
@@ -56,12 +89,35 @@ export type SuggestionArea = {
   label: string;
   center: LatLng;
   isPrimary: boolean;
+  /** Χρόνοι κάθε ατόμου ως το σημείο (με κίνηση, αν δόθηκε ώρα) */
+  travel: TravelEstimate[];
+  maxMin: number;
+  minMin: number;
+  /** Ακτίνα (m) στην οποία βρέθηκαν τα μαγαζιά (0 αν δεν έχουν φορτωθεί ακόμη) */
+  radiusM: number;
+  /** false = τα μαγαζιά φορτώνουν «κατά παραγγελία» (POST /v1/area-venues) */
+  hasVenues: boolean;
+};
+
+/** Ενημερώσεις για τον χρήστη όταν η απάντηση είναι «φτωχότερη» (π.χ. εξαντλήθηκε το δωρεάν όριο) */
+export type ResultNotices = {
+  /** Κάποιοι χρόνοι είναι εκτίμηση απόστασης, όχι πραγματική διαδρομή */
+  estimatedTimes?: boolean;
+  /** Τα μαγαζιά είναι από OpenStreetMap, χωρίς βαθμολογίες */
+  basicVenues?: boolean;
 };
 
 export type SuggestionsResponse = {
   areas: SuggestionArea[];
   primary: ScoredVenue[];
   alternatives: ScoredVenue[];
+  notices?: ResultNotices;
+};
+
+export type AreaVenuesResponse = {
+  area: SuggestionArea;
+  venues: ScoredVenue[];
+  notices?: ResultNotices;
 };
 
 export type TransitStep = {
@@ -89,6 +145,10 @@ export type ParticipantPlan = {
   distanceKm: number;
   costEur: number;
   costNote: string;
+  /** Διόδια που περιλαμβάνονται στο κόστος (αν υπάρχουν) */
+  tollEur?: number;
+  /** Εκτίμηση χρόνου εύρεσης parking (περιλαμβάνεται στο durationMin) */
+  parkingSearchMin?: number;
   transitSteps?: TransitStep[];
   parking?: ParkingOption[];
   /** Deep link για πλοήγηση (Google Maps) */

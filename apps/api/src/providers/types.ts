@@ -9,7 +9,16 @@ import type {
   Venue,
 } from '@centimeet/shared';
 
-export type MatrixCell = { durationMin: number; distanceKm: number } | null; // null = δεν υπάρχει διαδρομή
+/** null = δεν υπάρχει διαδρομή · estimated = εκτίμηση απόστασης (εφεδρική λειτουργία), όχι πραγματική διαδρομή */
+export type MatrixCell = { durationMin: number; distanceKm: number; estimated?: boolean } | null;
+
+/**
+ * Πότε γίνεται η διαδρομή:
+ *  - departAt: ώρα αναχώρησης (οχήματα: κίνηση εκείνης της ώρας)
+ *  - arriveBy: ώρα άφιξης (μόνο συγκοινωνίες — το Google δεν το δέχεται για οδήγηση)
+ * Χωρίς timing: «τώρα», χωρίς κίνηση (φθηνότερο).
+ */
+export type RouteTiming = { departAt?: Date; arriveBy?: Date };
 
 export type { PlaceSuggestion, ResolvedPlace };
 
@@ -30,14 +39,14 @@ export interface PlacesProvider extends Geocoder {
 
 export interface RoutingProvider {
   /** Πίνακας χρόνων: [origin][destination] — όλοι οι origins με το ίδιο μέσο */
-  matrix(origins: LatLng[], destinations: LatLng[], mode: TransportMode, departAt?: Date): Promise<MatrixCell[][]>;
+  matrix(origins: LatLng[], destinations: LatLng[], mode: TransportMode, timing?: RouteTiming): Promise<MatrixCell[][]>;
   /** Μία διαδρομή με βήματα (για συγκοινωνίες) */
   route(
     origin: LatLng,
     destination: LatLng,
     mode: TransportMode,
-    departAt?: Date,
-  ): Promise<{ durationMin: number; distanceKm: number; steps?: TransitStep[] } | null>;
+    timing?: RouteTiming,
+  ): Promise<{ durationMin: number; distanceKm: number; steps?: TransitStep[]; tollEur?: number; estimated?: boolean } | null>;
 }
 
 export interface Providers {
