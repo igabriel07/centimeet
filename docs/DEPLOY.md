@@ -45,6 +45,14 @@
 
 ## 3. Backend στο Cloud Run
 
+> Στην πράξη (Νοέμβριος 2026) προέκυψαν τα εξής — ακολουθήστε τα:
+> - Το secret key του Supabase με το CLI: `supabase projects api-keys --reveal` (χωρίς `--reveal` επιστρέφεται **κρυμμένο** και ο μετρητής κόστους μπλοκάρει το Google).
+> - Το API τρέχει με **δικό του service account** (`centimeet-api@…`) που διαβάζει μόνο τα 2 secrets· ο προεπιλεγμένος λογαριασμός compute χρειάζεται `roles/run.builder` για τα builds από κώδικα.
+> - Το `.gcloudignore` στέλνει στο Cloud Build μόνο τον κώδικα του API (ποτέ `.env`). Έλεγχος: `gcloud meta list-files-for-upload .`
+> - Καθαρισμός παλιών images (μένουμε στο δωρεάν 0,5 GB):
+>   `gcloud artifacts repositories set-cleanup-policies cloud-run-source-deploy --location=europe-west1 --policy=docs/gcp/artifact-cleanup.json --no-dry-run`
+> - Budget alert: `gcloud billing budgets create --billing-account=… --budget-amount=1EUR --filter-projects=projects/<αριθμός project> --threshold-rule=percent=0.5 --threshold-rule=percent=0.9 --threshold-rule=percent=1.0`
+
 Χρειάζεσαι το [gcloud CLI](https://cloud.google.com/sdk/docs/install) συνδεδεμένο στο ίδιο project.
 
 ```bash
@@ -57,6 +65,7 @@ gcloud run deploy centimeet-api \
   --source . \
   --region europe-west1 \
   --allow-unauthenticated \
+  --service-account centimeet-api@ΤΟ-PROJECT.iam.gserviceaccount.com \
   --min-instances 0 --max-instances 2 \
   --memory 512Mi \
   --set-env-vars "USE_MOCK_PROVIDERS=false,COST_MODE=lean,REQUIRE_AUTH=true,SUPABASE_URL=https://ΤΟ-PROJECT.supabase.co" \
