@@ -1,0 +1,14 @@
+# Τι ΔΕΝ ανεβαίνει στο Google Cloud Build με `gcloud run deploy --source .`
+# (μόνο ό,τι χρειάζεται το Dockerfile: package*.json, tsconfig.base.json, packages/shared, apps/api)
+.git
+.github
+**/node_modules
+**/.env
+**/.env.*
+!**/.env.example
+supabase/
+apps/mobile/
+docs/
+scripts/
+**/*.test.ts
+**/.expo
