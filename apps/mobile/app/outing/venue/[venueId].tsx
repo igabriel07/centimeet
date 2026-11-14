@@ -98,6 +98,8 @@ function PersonRow({
             💶 {t('venue.cost')}: {plan.costEur.toFixed(2)}€ <Body muted>({plan.costNote})</Body>
           </Body>
           <Body muted>{plan.distanceKm} km</Body>
+          {plan.tollEur ? <Body muted>🛣️ {t('venue.tolls', { eur: plan.tollEur.toFixed(2) })}</Body> : null}
+          {plan.parkingSearchMin ? <Body muted>🅿️ {t('venue.parkingSearch', { min: plan.parkingSearchMin })}</Body> : null}
 
           {plan.transitSteps?.length ? (
             <>

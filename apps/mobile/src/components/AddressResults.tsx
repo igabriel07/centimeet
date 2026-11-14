@@ -1,7 +1,7 @@
 import type { PlaceSuggestion } from '@centimeet/shared';
 import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
-import { useTheme } from './ui';
+import { ActivityIndicator, Pressable, View } from 'react-native';
+import { AppText as Text, useTheme } from './ui';
 
 /** Λίστα αποτελεσμάτων αναζήτησης διεύθυνσης (κύριο + δευτερεύον κείμενο) */
 export function AddressResults({

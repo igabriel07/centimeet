@@ -3,7 +3,7 @@
     "name": "CentiMeet",
     "slug": "centimeet",
     "scheme": "centimeet",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "orientation": "default",
     "userInterfaceStyle": "automatic",
     "ios": {
@@ -11,12 +11,30 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Το CentiMeet χρησιμοποιεί την τοποθεσία σου μόνο για να ορίσεις από πού ξεκινάς.",
-        "LSApplicationQueriesSchemes": ["viber", "whatsapp", "fb-messenger", "comgooglemaps"]
+        "LSApplicationQueriesSchemes": [
+          "viber",
+          "whatsapp",
+          "fb-messenger",
+          "comgooglemaps"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "buildNumber": "1",
+      "config": {
+        "usesNonExemptEncryption": false
       }
     },
     "android": {
       "package": "app.centimeet",
-      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ],
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#E4572E"
+      }
     },
     "plugins": [
       "expo-router",
@@ -27,10 +45,35 @@
         {
           "locationWhenInUsePermission": "Το CentiMeet χρησιμοποιεί την τοποθεσία σου μόνο για να ορίσεις από πού ξεκινάς."
         }
-      ]
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#F7F6F2",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#121214"
+          }
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#E4572E"
+        }
+      ],
+      "@sentry/react-native"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "icon": "./assets/icon.png",
+    "runtimeVersion": {
+      "policy": "appVersion"
     }
   }
 }

@@ -1,9 +1,10 @@
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FlatList, KeyboardAvoidingView, Platform, View } from 'react-native';
+import { FlatList, KeyboardAvoidingView, Platform, Pressable, View } from 'react-native';
 import { Body, Button, Input, Screen, useTheme } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
+import { openModerationMenu } from '@/lib/moderation';
 import { supabase } from '@/lib/supabase';
 
 type Message = { id: string; sender_id: string | null; kind: string; body: string; created_at: string };
@@ -76,7 +77,11 @@ export default function Chat() {
             const mine = item.sender_id === me;
             if (item.kind === 'system') return <Body muted style={{ textAlign: 'center', fontSize: 13 }}>{item.body}</Body>;
             return (
-              <View
+              <Pressable
+                disabled={mine || !item.sender_id}
+                onLongPress={() =>
+                  item.sender_id && openModerationMenu({ id: item.sender_id, name: t('moderation.thisUser') }, { messageId: item.id })
+                }
                 style={{
                   alignSelf: mine ? 'flex-end' : 'flex-start',
                   backgroundColor: mine ? c.primary : c.card,
@@ -87,7 +92,7 @@ export default function Chat() {
                 }}
               >
                 <Body style={{ color: mine ? c.primaryText : c.text }}>{item.body}</Body>
-              </View>
+              </Pressable>
             );
           }}
         />

@@ -2,13 +2,13 @@ import type { CityId, ResolvedPlace } from '@centimeet/shared';
 import * as Location from 'expo-location';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Alert, Platform, Pressable, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, View } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import { api } from '@/lib/api';
 import { useAddressSearch } from '@/lib/useAddressSearch';
 import { AddressResults } from './AddressResults';
 import { MapPicker } from './MapPicker';
-import { Chip, Input, useTheme } from './ui';
+import { AppText as Text, Chip, Input, useTheme } from './ui';
 
 /**
  * Αφετηρία ενός ατόμου:

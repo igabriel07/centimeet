@@ -1,3 +1,7 @@
+/**
+ * Βασικά δομικά στοιχεία της εφαρμογής. Η εμφάνιση (χρώματα, γραμματοσειρά, μεγέθη)
+ * έρχεται από το src/theme.ts — εκεί κάνεις τις αλλαγές, όχι εδώ.
+ */
 import type { ReactNode } from 'react';
 import {
   ActivityIndicator,
@@ -8,23 +12,42 @@ import {
   useColorScheme,
   useWindowDimensions,
   View,
+  type StyleProp,
   type TextInputProps,
+  type TextProps,
+  type TextStyle,
   type ViewStyle,
 } from 'react-native';
+import { fonts, palette, radius, space, TABLET_MIN_WIDTH, typeScale, type Colors } from '@/theme';
 
-export const colors = {
-  light: { bg: '#F7F6F2', card: '#FFFFFF', text: '#1B1B1F', muted: '#6B6B76', border: '#E4E2DC', primary: '#E4572E', primaryText: '#FFFFFF', good: '#2E9E5B', chip: '#EFEDE7' },
-  dark: { bg: '#121214', card: '#1E1E22', text: '#F2F2F4', muted: '#A0A0AA', border: '#2C2C32', primary: '#FF6B3D', primaryText: '#FFFFFF', good: '#44C07A', chip: '#2A2A30' },
-};
+/** @deprecated χρησιμοποίησε το palette από το '@/theme' */
+export const colors = palette;
 
-export function useTheme() {
-  return colors[useColorScheme() === 'dark' ? 'dark' : 'light'];
+export function useTheme(): Colors {
+  return palette[useColorScheme() === 'dark' ? 'dark' : 'light'];
 }
 
-/** Tablet = πλάτος ≥ 768. Χρησιμοποιείται για διάταξη δύο στηλών. */
+/** Tablet = πλάτος ≥ TABLET_MIN_WIDTH. Χρησιμοποιείται για διάταξη δύο στηλών. */
 export function useResponsive() {
   const { width } = useWindowDimensions();
-  return { isTablet: width >= 768, width, contentMaxWidth: 720 };
+  return { isTablet: width >= TABLET_MIN_WIDTH, width, contentMaxWidth: 720 };
+}
+
+/**
+ * Με custom γραμματοσειρά το fontWeight δεν διαλέγει μόνο του το σωστό αρχείο (ειδικά στο Android),
+ * οπότε μετατρέπουμε το βάρος σε fontFamily.
+ */
+function withFont(style: StyleProp<TextStyle>): TextStyle {
+  const flat = StyleSheet.flatten(style) ?? {};
+  const { fontWeight, ...rest } = flat;
+  const w = Number(fontWeight === 'bold' ? 700 : fontWeight === 'normal' ? 400 : (fontWeight ?? 400));
+  const fontFamily = w >= 700 ? fonts.bold : w >= 600 ? fonts.semibold : w >= 500 ? fonts.medium : fonts.regular;
+  return { fontFamily, ...rest };
+}
+
+/** Κείμενο με τη γραμματοσειρά της εφαρμογής (αντί για σκέτο <Text>) */
+export function AppText({ style, ...props }: TextProps) {
+  return <Text {...props} style={withFont(style)} />;
 }
 
 export function Screen({ children, style }: { children?: ReactNode; style?: ViewStyle }) {
@@ -41,24 +64,48 @@ export function Screen({ children, style }: { children?: ReactNode; style?: View
 
 export function H1({ children }: { children: ReactNode }) {
   const c = useTheme();
-  return <Text style={[s.h1, { color: c.text }]}>{children}</Text>;
+  return <AppText style={[s.h1, { color: c.text }]}>{children}</AppText>;
 }
 
 export function Label({ children }: { children: ReactNode }) {
   const c = useTheme();
-  return <Text style={[s.label, { color: c.muted }]}>{children}</Text>;
+  return <AppText style={[s.label, { color: c.muted }]}>{children}</AppText>;
 }
 
-export function Body({ children, muted, style }: { children: ReactNode; muted?: boolean; style?: object }) {
+export function Body({
+  children,
+  muted,
+  style,
+  onPress,
+}: {
+  children: ReactNode;
+  muted?: boolean;
+  style?: StyleProp<TextStyle>;
+  onPress?: () => void;
+}) {
   const c = useTheme();
-  return <Text style={[{ color: muted ? c.muted : c.text, fontSize: 15 }, style]}>{children}</Text>;
+  return (
+    <AppText onPress={onPress} style={[{ color: muted ? c.muted : c.text, fontSize: typeScale.body }, style]}>
+      {children}
+    </AppText>
+  );
 }
 
-export function Card({ children, onPress, style }: { children: ReactNode; onPress?: () => void; style?: ViewStyle }) {
+export function Card({
+  children,
+  onPress,
+  onLongPress,
+  style,
+}: {
+  children: ReactNode;
+  onPress?: () => void;
+  onLongPress?: () => void;
+  style?: ViewStyle;
+}) {
   const c = useTheme();
   const content = <View style={[s.card, { backgroundColor: c.card, borderColor: c.border }, style]}>{children}</View>;
-  return onPress ? (
-    <Pressable onPress={onPress} style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}>
+  return onPress || onLongPress ? (
+    <Pressable onPress={onPress} onLongPress={onLongPress} style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}>
       {content}
     </Pressable>
   ) : (
@@ -75,29 +122,25 @@ export function Button({
 }: {
   title: string;
   onPress: () => void;
-  variant?: 'primary' | 'secondary';
+  variant?: 'primary' | 'secondary' | 'danger';
   loading?: boolean;
   disabled?: boolean;
 }) {
   const c = useTheme();
-  const primary = variant === 'primary';
+  const bg = variant === 'primary' ? c.primary : variant === 'danger' ? c.danger : c.chip;
+  const fg = variant === 'secondary' ? c.text : c.primaryText;
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityState={{ disabled: disabled || loading, busy: loading }}
       onPress={onPress}
       disabled={disabled || loading}
-      style={({ pressed }) => [
-        s.button,
-        {
-          backgroundColor: primary ? c.primary : c.chip,
-          opacity: disabled ? 0.5 : pressed ? 0.85 : 1,
-        },
-      ]}
+      style={({ pressed }) => [s.button, { backgroundColor: bg, opacity: disabled ? 0.5 : pressed ? 0.85 : 1 }]}
     >
       {loading ? (
-        <ActivityIndicator color={primary ? c.primaryText : c.text} />
+        <ActivityIndicator color={fg} />
       ) : (
-        <Text style={{ color: primary ? c.primaryText : c.text, fontWeight: '600', fontSize: 16 }}>{title}</Text>
+        <AppText style={{ color: fg, fontWeight: '600', fontSize: typeScale.button }}>{title}</AppText>
       )}
     </Pressable>
   );
@@ -108,10 +151,11 @@ export function Chip({ label, selected, onPress }: { label: string; selected?: b
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
       accessibilityState={{ selected }}
       style={[s.chip, { backgroundColor: selected ? c.primary : c.chip }]}
     >
-      <Text style={{ color: selected ? c.primaryText : c.text, fontWeight: selected ? '600' : '400' }}>{label}</Text>
+      <AppText style={{ color: selected ? c.primaryText : c.text, fontWeight: selected ? '600' : '400' }}>{label}</AppText>
     </Pressable>
   );
 }
@@ -122,20 +166,34 @@ export function Input(props: TextInputProps) {
     <TextInput
       placeholderTextColor={c.muted}
       {...props}
-      style={[s.input, { color: c.text, backgroundColor: c.card, borderColor: c.border }, props.style]}
+      style={[s.input, withFont(props.style), { color: c.text, backgroundColor: c.card, borderColor: c.border }]}
     />
   );
 }
 
 export function Row({ children, style }: { children: ReactNode; style?: ViewStyle }) {
-  return <View style={[{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }, style]}>{children}</View>;
+  return <View style={[{ flexDirection: 'row', alignItems: 'center', gap: space.sm, flexWrap: 'wrap' }, style]}>{children}</View>;
 }
 
 const s = StyleSheet.create({
-  h1: { fontSize: 26, fontWeight: '700', marginBottom: 8 },
-  label: { fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 20, marginBottom: 8 },
-  card: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: 14, marginBottom: 10 },
-  button: { borderRadius: 14, paddingVertical: 14, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center', minHeight: 50 },
-  chip: { borderRadius: 999, paddingVertical: 8, paddingHorizontal: 14 },
-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 },
+  h1: { fontSize: typeScale.h1, fontWeight: '700', marginBottom: space.sm },
+  label: {
+    fontSize: typeScale.label,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: space.xl,
+    marginBottom: space.sm,
+  },
+  card: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, padding: 14, marginBottom: 10 },
+  button: {
+    borderRadius: radius.button,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 50,
+  },
+  chip: { borderRadius: radius.pill, paddingVertical: space.sm, paddingHorizontal: 14 },
+  input: { borderWidth: 1, borderRadius: radius.md, paddingHorizontal: space.md, paddingVertical: 10, fontSize: typeScale.input },
 });

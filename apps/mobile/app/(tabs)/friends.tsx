@@ -5,16 +5,9 @@ import { useTranslation } from 'react-i18next';
 import { Alert, FlatList, View } from 'react-native';
 import { Body, Button, Card, Chip, Input, Label, Row, Screen } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
+import { acceptedFriends, useFriendships, type Profile } from '@/lib/friends';
+import { openModerationMenu } from '@/lib/moderation';
 import { supabase } from '@/lib/supabase';
-
-type Profile = { id: string; username: string; display_name: string };
-type FriendshipRow = {
-  requester_id: string;
-  addressee_id: string;
-  status: 'pending' | 'accepted' | 'declined';
-  requester: Profile;
-  addressee: Profile;
-};
 
 export default function Friends() {
   const { t } = useTranslation();
@@ -23,20 +16,7 @@ export default function Friends() {
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
 
-  const friendships = useQuery({
-    queryKey: ['friendships', me],
-    enabled: !!me,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('friendships')
-        .select(
-          'requester_id, addressee_id, status, requester:profiles!friendships_requester_id_fkey(id, username, display_name), addressee:profiles!friendships_addressee_id_fkey(id, username, display_name)',
-        )
-        .neq('status', 'declined');
-      if (error) throw error;
-      return data as unknown as FriendshipRow[];
-    },
-  });
+  const friendships = useFriendships(me);
 
   const results = useQuery({
     queryKey: ['profile-search', search],
@@ -93,9 +73,7 @@ export default function Friends() {
 
   const rows = friendships.data ?? [];
   const incoming = rows.filter((r) => r.status === 'pending' && r.addressee_id === me);
-  const friends = rows
-    .filter((r) => r.status === 'accepted')
-    .map((r) => (r.requester_id === me ? r.addressee : r.requester));
+  const friends = acceptedFriends(rows, me);
   const knownIds = new Set(rows.flatMap((r) => [r.requester_id, r.addressee_id]));
 
   return (
@@ -129,11 +107,20 @@ export default function Friends() {
               </Card>
             ))}
             <Label>{t('friends.title')}</Label>
+            {friends.length ? <Body muted style={{ fontSize: 12, marginBottom: 8 }}>{t('moderation.hintFriends')}</Body> : null}
             {friends.length === 0 && !friendships.isLoading ? <Body muted>{t('friends.empty')}</Body> : null}
           </View>
         }
         renderItem={({ item }) => (
-          <Card onPress={() => openChat(item.id)}>
+          <Card
+            onPress={() => openChat(item.id)}
+            onLongPress={() =>
+              openModerationMenu(
+                { id: item.id, name: item.display_name },
+                { onBlocked: () => qc.invalidateQueries({ queryKey: ['friendships'] }) },
+              )
+            }
+          >
             <Body style={{ fontWeight: '600' }}>{item.display_name}</Body>
             <Body muted>@{item.username}</Body>
           </Card>

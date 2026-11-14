@@ -2,13 +2,13 @@ import { CITY_CONFIG, type CityId, type LatLng, type ResolvedPlace } from '@cent
 import * as Location from 'expo-location';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, Keyboard, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Keyboard, Modal, Pressable, StyleSheet, View } from 'react-native';
 import MapView, { type Region } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '@/lib/api';
 import { useAddressSearch } from '@/lib/useAddressSearch';
 import { AddressResults } from './AddressResults';
-import { Button, Input, useTheme } from './ui';
+import { AppText as Text, Button, Input, useTheme } from './ui';
 
 const ZOOMED = { latitudeDelta: 0.006, longitudeDelta: 0.006 };
 const CITY_ZOOM = { latitudeDelta: 0.15, longitudeDelta: 0.15 };
