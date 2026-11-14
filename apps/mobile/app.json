@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "CentiMeet",
+    "slug": "centimeet",
+    "scheme": "centimeet",
+    "version": "0.1.0",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "app.centimeet",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Το CentiMeet χρησιμοποιεί την τοποθεσία σου μόνο για να ορίσεις από πού ξεκινάς.",
+        "LSApplicationQueriesSchemes": ["viber", "whatsapp", "fb-messenger", "comgooglemaps"]
+      }
+    },
+    "android": {
+      "package": "app.centimeet",
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-localization",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Το CentiMeet χρησιμοποιεί την τοποθεσία σου μόνο για να ορίσεις από πού ξεκινάς."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

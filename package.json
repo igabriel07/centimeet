@@ -1,0 +1,15 @@
+{
+  "name": "centimeet",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev -w @centimeet/api",
+    "dev:mobile": "npm run start -w @centimeet/mobile",
+    "test": "npm run test -w @centimeet/shared && npm run test -w @centimeet/api",
+    "typecheck": "npm run typecheck -w @centimeet/shared && npm run typecheck -w @centimeet/api"
+  }
+}
