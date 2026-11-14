@@ -66,4 +66,24 @@ set role service_role;
 select test.ok(public.consume_api_usage('2026-11', 'google:places_search', 1, 10), 'το backend μετρά χρήση');
 reset role;
 
-\echo 'Δικαιώματα πινάκων ✅'
+-- ---------- Βοηθητικές συναρτήσεις: όχι πληροφορίες για ΑΛΛΟΥΣ χρήστες ----------
+insert into public.friendships (requester_id, addressee_id, status) values (:'L', :'M', 'accepted');
+select test.login(:'K');
+set role authenticated;
+select test.ok(not public.are_friends(:'L', :'M'), 'ο Κ δεν μαθαίνει αν η Λ και ο Μ είναι φίλοι');
+select test.ok(not public.is_blocked(:'L', :'M'), 'ο Κ δεν μαθαίνει αν η Λ απέκλεισε τον Μ');
+select test.ok(public.are_friends(:'K', :'L'), 'ο Κ μαθαίνει μόνο για τις δικές του φιλίες');
+select test.ok(not public.is_outing_member(:'outing', :'L'), 'ο Κ δεν ρωτά για συμμετοχή άλλου');
+select test.ok(public.is_outing_member(:'outing', :'K'), 'ο Κ ρωτά για τη δική του συμμετοχή');
+select test.throws($$select public.handle_new_user()$$, '42501', 'οι συναρτήσεις triggers δεν καλούνται ως RPC');
+reset role;
+select test.login(:'L');
+set role authenticated;
+select test.ok(public.is_blocked(:'L', :'M'), 'η Λ βλέπει τον δικό της αποκλεισμό');
+reset role;
+set role anon;
+select test.throws(format($$select public.are_friends(%L, %L)$$, :'K', :'L'), '42501', 'ο anon δεν εκτελεί βοηθητικές συναρτήσεις');
+select test.throws(format($$select public.get_or_create_direct_conversation(%L)$$, :'K'), '42501', 'ο anon δεν ανοίγει συνομιλίες');
+reset role;
+
+\echo 'Δικαιώματα πινάκων & συναρτήσεων ✅'
