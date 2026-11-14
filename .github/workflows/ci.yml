@@ -3,7 +3,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
   # Χειροκίνητη εκτέλεση από το GitHub (Actions → CI → Run workflow) ή με `gh workflow run CI`
   workflow_dispatch:
