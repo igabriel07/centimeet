@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/api/package.json apps/api/
-RUN npm ci --workspace @centimeet/shared --workspace @centimeet/api --include=dev --no-audit --no-fund
+RUN npm ci --workspace @centimeet/shared --workspace @centimeet/api --omit=dev --no-audit --no-fund && npm cache clean --force
 
 COPY packages/shared packages/shared
 COPY apps/api apps/api

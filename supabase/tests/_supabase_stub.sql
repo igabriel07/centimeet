@@ -23,11 +23,10 @@ $$;
 grant usage on schema public, auth, extensions to anon, authenticated, service_role;
 grant execute on function auth.uid() to anon, authenticated, service_role;
 
--- Όπως στο Supabase: οι ρόλοι του API έχουν πλήρη δικαιώματα στους νέους πίνακες
--- του public και το RLS κάνει τον έλεγχο.
-alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
-alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
-alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
+-- Όπως στο Supabase από 30/5/2026 (νέα projects) και 30/10/2026 (όλα): οι νέοι πίνακες ΔΕΝ παίρνουν
+-- αυτόματα δικαιώματα για anon/authenticated/service_role — χρειάζονται ρητά grants στα migrations.
+-- Οι συναρτήσεις παραμένουν εκτελέσιμες από PUBLIC (προεπιλογή Postgres) εκτός αν γίνει revoke.
+alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
 
 set client_min_messages = error;  -- χωρίς το warning για wal_level
 create publication supabase_realtime;
