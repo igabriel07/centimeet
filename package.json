@@ -10,6 +10,9 @@
     "dev:api": "npm run dev -w @centimeet/api",
     "dev:mobile": "npm run start -w @centimeet/mobile",
     "test": "npm run test -w @centimeet/shared && npm run test -w @centimeet/api",
-    "typecheck": "npm run typecheck -w @centimeet/shared && npm run typecheck -w @centimeet/api"
+    "test:db": "bash supabase/tests/run.sh",
+    "typecheck": "npm run typecheck -w @centimeet/shared && npm run typecheck -w @centimeet/api && npm run typecheck -w @centimeet/mobile",
+    "legal:export": "tsx scripts/export-legal.ts",
+    "icons": "cd apps/mobile && python scripts/make-icons.py"
   }
 }

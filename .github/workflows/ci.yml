@@ -1,0 +1,36 @@
+# Έλεγχοι σε κάθε push / pull request (GitHub Actions — δωρεάν για τέτοια χρήση)
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck (shared, api, mobile)
+        run: npm run typecheck
+      - name: Tests (αλγόριθμος, API, φρένο κόστους)
+        run: npm test
+      - name: DB tests (migrations, RLS, push, διαγραφή λογαριασμού)
+        run: npm run test:db
+      - name: Bundle εφαρμογής (Android)
+        working-directory: apps/mobile
+        run: npx expo export --platform android --output-dir /tmp/expo-export
+        env:
+          CI: 1
+      - name: Docker image του API
+        run: docker build -t centimeet-api:ci .
