@@ -526,7 +526,7 @@ function SuggestionCard({ s, onPress }: { s: ScoredVenue; onPress?: () => void }
   return (
     <Card onPress={onPress}>
       <Body style={{ fontWeight: '700' }}>{s.venue.name}</Body>
-      <Body muted style={{ marginTop: 4 }}>⏱ {t('results.range', { min: s.minMin, max: s.maxMin })}</Body>
+      <Body muted style={{ marginTop: 4 }}>⏱ {t('results.range', { min: `${s.travel.some((x) => x.estimated) ? '~' : ''}${s.minMin}`, max: s.maxMin })}</Body>
     </Card>
   );
 }

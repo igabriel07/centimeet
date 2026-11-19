@@ -12,11 +12,14 @@ import { Pressable, View } from 'react-native';
 import { radius, typeScale } from '@/theme';
 import { openInGoogleMaps } from '@/lib/parking';
 import { ratingText } from './FixedPlacePicker';
+import { OsmAttribution } from './OsmAttribution';
 import { AppText as Text, Button, useTheme } from './ui';
 
 export type TripPlan = {
   mode?: string;
   durationMin?: number;
+  /** Ο χρόνος είναι εκτίμηση → «~» */
+  estimated?: boolean;
   costEur?: number;
   navigationUrl?: string;
   steps?: Partial<TransitStep>[];
@@ -95,7 +98,7 @@ export function DecidedVenue({ venue, plan, title }: { venue: FixedVenue; plan?:
   const summary = plan
     ? [
         plan.mode ? t(`mode.${plan.mode}`) : null,
-        plan.durationMin != null ? t('venue.duration', { min: plan.durationMin }) : null,
+        plan.durationMin != null ? t('venue.duration', { min: `${plan.estimated ? '~' : ''}${plan.durationMin}` }) : null,
         plan.costEur != null ? `${plan.costEur.toFixed(2)}€` : null,
       ].filter(Boolean)
     : [];
@@ -133,6 +136,8 @@ export function DecidedVenue({ venue, plan, title }: { venue: FixedVenue; plan?:
           {plan.navigationUrl ? <Button title={`🧭 ${t('venue.navigate')}`} onPress={() => Linking.openURL(plan.navigationUrl!)} /> : null}
         </View>
       ) : null}
+      {/* Μαγαζί από OpenStreetMap → υποχρεωτική αναφορά */}
+      {venue.id?.startsWith('osm:') ? <OsmAttribution style={{ marginTop: 0, marginBottom: 8 }} /> : null}
     </View>
   );
 }

@@ -12,7 +12,7 @@ import type { GoogleSku, UsageGuard } from '../lib/usage';
 import { usesTextSearch } from './categories';
 import { EstimateRouting } from './estimate';
 import { routesTier, type GoogleProvider } from './google';
-import { osmParking, osmVenues } from './osm';
+import { DEFAULT_OVERPASS_URL, osmParking, osmVenueById, osmVenues } from './osm';
 import type { Geocoder, MatrixCell, PlacesProvider, RouteTiming, RoutingProvider } from './types';
 
 export class GuardedProvider implements PlacesProvider, RoutingProvider {
@@ -25,6 +25,7 @@ export class GuardedProvider implements PlacesProvider, RoutingProvider {
     private cache: Cache,
     private log: (msg: string, extra?: Record<string, unknown>) => void = () => {},
     private fetchImpl: typeof fetch = fetch,
+    private overpassUrl = DEFAULT_OVERPASS_URL,
   ) {}
 
   private async withBudget<T>(sku: GoogleSku, units: number, paid: () => Promise<T>, free: () => Promise<T>): Promise<T> {
@@ -70,7 +71,7 @@ export class GuardedProvider implements PlacesProvider, RoutingProvider {
       1,
       () => this.google.searchVenues(center, activity, radiusM, max, category),
       async () => {
-        const venues = await osmVenues(center, activity, radiusM, this.cache, this.fetchImpl, category).catch(() => []);
+        const venues = await osmVenues(center, activity, radiusM, this.cache, this.fetchImpl, category, this.overpassUrl).catch(() => []);
         await Promise.all(venues.map((v) => this.cache.set(`venue:${v.id}`, v, 60 * 60)));
         return venues;
       },
@@ -78,7 +79,9 @@ export class GuardedProvider implements PlacesProvider, RoutingProvider {
   }
 
   async getVenue(placeId: string): Promise<Venue | null> {
-    if (placeId.startsWith('osm:')) return (await this.cache.get<Venue>(`venue:${placeId}`)) ?? null;
+    if (placeId.startsWith('osm:')) {
+      return (await this.cache.get<Venue>(`venue:${placeId}`)) ?? osmVenueById(placeId, this.cache, this.fetchImpl, this.overpassUrl).catch(() => null);
+    }
     // Συνήθως είναι ήδη στην cache από την αναζήτηση → δωρεάν
     if (await this.google.hasCachedVenue(placeId)) return this.google.getVenue(placeId);
     return this.withBudget(
@@ -94,7 +97,7 @@ export class GuardedProvider implements PlacesProvider, RoutingProvider {
       'parking_search',
       1,
       () => this.google.searchParking(center, radiusM),
-      () => osmParking(center, radiusM, this.cache, this.fetchImpl).catch(() => []),
+      () => osmParking(center, radiusM, this.cache, this.fetchImpl, this.overpassUrl).catch(() => []),
     );
   }
 

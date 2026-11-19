@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, Alert, ScrollView, View } from 'react-native';
 import { Body, Button, Card, Chip, H1, Label, Row, Screen, useTheme } from '@/components/ui';
+import { OsmAttribution, tilde } from '@/components/OsmAttribution';
 import { TransitChain } from '@/components/VenueTrip';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -118,6 +119,7 @@ export default function VenueScreen() {
             />
           </>
         ) : null}
+        {data.venue.fromOsm || data.venue.source === 'osm' ? <OsmAttribution /> : null}
       </ScrollView>
     </Screen>
   );
@@ -144,7 +146,7 @@ function PersonRow({
       <Row style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
         <Body style={{ fontWeight: '700', fontSize: 17 }}>{plan.name}</Body>
         <Body style={{ fontWeight: '700' }}>
-          {t(`mode.${plan.mode}`)} · {t('venue.duration', { min: plan.durationMin })}
+          {t(`mode.${plan.mode}`)} · {t('venue.duration', { min: `${tilde(plan.estimated)}${plan.durationMin}` })}
         </Body>
       </Row>
 

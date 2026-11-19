@@ -12,7 +12,7 @@ import {
 } from '@centimeet/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { Env } from './env';
+import { routingProvider, usesGoogle, venuesProvider, type Env } from './env';
 import { venuePlan, PARKING_RADIUS_M } from './engine/plan';
 import { ENGINE_PROFILES } from './engine/config';
 import { areaVenues, suggest } from './engine/suggest';
@@ -25,7 +25,10 @@ import { GuardedProvider } from './providers/guarded';
 import { MockProvider } from './providers/mock';
 import { mergeParking, osmParking } from './providers/osm';
 import { PhotonGeocoder } from './providers/photon';
-import type { Geocoder, PlacesProvider, Providers } from './providers/types';
+import { EstimateRouting } from './providers/estimate';
+import { HybridPlaces, OsmPlaces } from './providers/osmVenues';
+import { OsrmRouting } from './providers/osrm';
+import type { Geocoder, PlacesProvider, Providers, RoutingProvider } from './providers/types';
 
 /** Ποια υπηρεσία κάνει αναζήτηση διευθύνσεων (auto: Photon στη λιτή λειτουργία — δωρεάν) */
 export function pickGeocoder(env: Env, cache: Cache, fallback: Geocoder): Geocoder {
@@ -49,32 +52,64 @@ function withGeocoder(places: PlacesProvider, geo: Geocoder): PlacesProvider {
   };
 }
 
+/**
+ * Ποιες πηγές χρησιμοποιούνται (βλ. .env: ROUTING_PROVIDER / VENUES_PROVIDER):
+ *  - χρόνοι:  google (με φρένο κόστους) · osrm (δωρεάν· συγκοινωνίες από Google αν υπάρχει κλειδί) · mock
+ *  - μαγαζιά: google · osm (δωρεάν) · hybrid (OSM + βαθμολογίες Google με μία κλήση) · mock
+ * Το Google (αν χρειάζεται) περνά ΠΑΝΤΑ από το «φρένο» κόστους (GuardedProvider).
+ */
 export function buildProviders(
   env: Env,
   cache: Cache,
   usage: UsageStore,
   log: (msg: string, extra?: Record<string, unknown>) => void = () => {},
+  fetchImpl: typeof fetch = fetch,
 ): { providers: Providers; findParking?: Parameters<typeof venuePlan>[2] } {
-  if (env.USE_MOCK_PROVIDERS) {
-    const m = new MockProvider();
-    return { providers: { places: withGeocoder(m, pickGeocoder(env, cache, m)), routing: m } };
+  const routingChoice = routingProvider(env);
+  const venuesChoice = venuesProvider(env);
+  const mock = new MockProvider();
+
+  // Google πίσω από το φρένο κόστους — μόνο όταν κάποια πηγή το χρειάζεται
+  let guarded: GuardedProvider | undefined;
+  if (usesGoogle(env) && env.GOOGLE_MAPS_API_KEY) {
+    const g = new GoogleProvider(env.GOOGLE_MAPS_API_KEY, cache, fetchImpl);
+    const guard = new UsageGuard(usage, defaultLimits(env.GOOGLE_BUDGET_FACTOR), undefined, (e) =>
+      log('usage store unavailable → Google blocked', { err: String(e) }),
+    );
+    guarded = new GuardedProvider(g, guard, pickGeocoder(env, cache, g), cache, log, fetchImpl, env.OVERPASS_URL);
   }
-  // Πραγματικό Google, πάντα πίσω από το «φρένο» κόστους
-  const g = new GoogleProvider(env.GOOGLE_MAPS_API_KEY, cache);
-  const guard = new UsageGuard(usage, defaultLimits(env.GOOGLE_BUDGET_FACTOR), undefined, (e) =>
-    log('usage store unavailable → Google blocked', { err: String(e) }),
-  );
-  const guarded = new GuardedProvider(g, guard, pickGeocoder(env, cache, g), cache, log);
-  return {
-    providers: { places: guarded, routing: guarded },
-    findParking: async (center) => {
-      const [google, osm] = await Promise.all([
-        guarded.searchParking(center, PARKING_RADIUS_M).catch(() => []),
-        osmParking(center, PARKING_RADIUS_M, cache).catch(() => []),
-      ]);
-      return mergeParking([google, osm]);
-    },
-  };
+  const geocoder = guarded ?? pickGeocoder(env, cache, mock);
+
+  const routing: RoutingProvider =
+    routingChoice === 'mock'
+      ? mock
+      : routingChoice === 'google'
+        ? guarded!
+        : new OsrmRouting(cache, guarded ?? new EstimateRouting(), env.OSRM_URL, fetchImpl, log);
+
+  const osm = () => new OsmPlaces(cache, geocoder, env.OVERPASS_URL, fetchImpl);
+  const places: PlacesProvider =
+    venuesChoice === 'mock'
+      ? withGeocoder(mock, geocoder)
+      : venuesChoice === 'google'
+        ? guarded!
+        : venuesChoice === 'osm'
+          ? osm()
+          : new HybridPlaces(osm(), guarded!, cache, log);
+
+  // Parking: με Google, συγχώνευση Google + OSM· αλλιώς μόνο OSM (δωρεάν, από τον PlacesProvider)
+  const findParking: Parameters<typeof venuePlan>[2] =
+    venuesChoice === 'google' && guarded
+      ? async (center) => {
+          const [google, osmList] = await Promise.all([
+            guarded!.searchParking(center, PARKING_RADIUS_M).catch(() => []),
+            osmParking(center, PARKING_RADIUS_M, cache, fetchImpl, env.OVERPASS_URL).catch(() => []),
+          ]);
+          return mergeParking([google, osmList]);
+        }
+      : undefined;
+
+  return { providers: { places, routing }, findParking };
 }
 
 /** Ακτίνα αναζήτησης δημοφιλών γύρω από το κέντρο της πόλης */

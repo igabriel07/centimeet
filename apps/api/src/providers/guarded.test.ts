@@ -127,7 +127,7 @@ describe('GuardedProvider', () => {
       providers,
       { config: ENGINE_PROFILES.lean },
     );
-    expect(res.notices).toEqual({ estimatedTimes: true, basicVenues: true });
+    expect(res.notices).toEqual({ estimatedTimes: true, basicVenues: true, osmData: true });
     expect(res.primary[0]!.venue.source).toBe('osm');
   });
 });

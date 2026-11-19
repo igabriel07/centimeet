@@ -159,6 +159,7 @@ export async function decideVenue(outingId: string, venue: Venue, plans: Partici
       participantId: p.participantId,
       mode: p.mode,
       durationMin: p.durationMin,
+      estimated: p.estimated,
       distanceKm: p.distanceKm,
       costEur: p.costEur,
       navigationUrl: p.navigationUrl,

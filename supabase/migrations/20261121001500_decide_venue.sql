@@ -55,6 +55,7 @@ begin
        set plan = jsonb_strip_nulls(jsonb_build_object(
          'mode', left(pl->>'mode', 20),
          'durationMin', case when jsonb_typeof(pl->'durationMin') = 'number' then pl->'durationMin' end,
+         'estimated', case when jsonb_typeof(pl->'estimated') = 'boolean' then pl->'estimated' end,
          'distanceKm', case when jsonb_typeof(pl->'distanceKm') = 'number' then pl->'distanceKm' end,
          'costEur', case when jsonb_typeof(pl->'costEur') = 'number' then pl->'costEur' end,
          'navigationUrl', v_url,

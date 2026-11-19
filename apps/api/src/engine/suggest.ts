@@ -54,7 +54,6 @@ export const SEARCH = {
   /** Το μαγαζί πρέπει να μένει ανοιχτό τουλάχιστον τόσο μετά την άφιξη */
   stayMin: 60,
   /** Αν ο πραγματικός χρόνος οδήγησης απέχει τόσο από την εκτίμηση, ξαναρωτάμε με σωστή ώρα αναχώρησης */
-  refineThresholdMin: 10,
 } as const;
 
 export type SuggestOptions = { config?: EngineConfig; now?: Date };
@@ -118,7 +117,7 @@ export async function suggest(req: SuggestRequest, providers: Providers, opts: S
     if (!found[i]) return perArea.push([]);
     const fresh = found[i]!.venues.filter((v) => !seen.has(v.id));
     fresh.forEach((v) => seen.add(v.id));
-    if (fresh.some((v) => v.source === 'osm')) notices.basicVenues = true;
+    Object.assign(notices, venueNotices(fresh));
     perArea.push(rankArea(req, area, fresh, at).slice(0, i === 0 ? SEARCH.primaryResults : SEARCH.altResultsPerArea));
   });
 
@@ -149,7 +148,7 @@ export async function areaVenues(req: AreaVenuesRequest, providers: Providers, o
   return {
     area,
     venues: rankArea(req, area, venues, at).slice(0, SEARCH.primaryResults),
-    notices: venues.some((v) => v.source === 'osm') ? { basicVenues: true } : {},
+    notices: venueNotices(venues),
   };
 }
 
@@ -217,7 +216,7 @@ async function travelToPoints(
   await Promise.all(
     [...groups.entries()].map(async ([mode, people]) => {
       const origins = people.map((p) => p.origin);
-      const m = await matrixFor(providers, mode, origins, destinations, meetAt, config);
+      const m = await matrixFor(providers, mode, origins, destinations, meetAt);
       people.forEach((person, oi) => {
         points.forEach((pt, di) => {
           const cell = m[oi]?.[di];
@@ -232,6 +231,7 @@ async function travelToPoints(
             durationMin: trip.durationMin,
             distanceKm: trip.distanceKm,
             costEur: trip.costEur,
+            ...(cell.estimated ? { estimated: true } : {}),
           });
         });
       });
@@ -248,11 +248,10 @@ async function travelToPoints(
 }
 
 /**
- * Matrix με τον σωστό χρονισμό:
- *  - οχήματα + ώρα συνάντησης: το Google δέχεται μόνο ώρα ΑΝΑΧΩΡΗΣΗΣ, οπότε
- *    αναχώρηση = συνάντηση − εκτιμώμενη διάρκεια· (growth) αν η πραγματική διάρκεια απέχει πολύ, ξαναρωτάμε
- *  - συγκοινωνίες + ώρα συνάντησης: ώρα ΑΦΙΞΗΣ
- *  - αλλιώς «τώρα», χωρίς κίνηση
+ * Matrix με τον σωστό χρονισμό — ΧΩΡΙΣ κίνηση (Google: Essentials $5/1000 αντί Pro $10/1000):
+ *  - συγκοινωνίες + ώρα συνάντησης: ώρα ΑΦΙΞΗΣ (δρομολόγια — δεν αλλάζει τη χρέωση)
+ *  - όλα τα άλλα: «τώρα», χωρίς κίνηση
+ * Η κίνηση υπολογίζεται μόνο στο πλάνο του μαγαζιού που διαλέγει η παρέα (venue-plan, λίγες κλήσεις).
  */
 async function matrixFor(
   providers: Providers,
@@ -260,18 +259,9 @@ async function matrixFor(
   origins: LatLng[],
   destinations: LatLng[],
   meetAt: Date | undefined,
-  config: EngineConfig,
 ): Promise<MatrixCell[][]> {
-  if (!meetAt || mode === 'walk' || mode === 'bike') return providers.routing.matrix(origins, destinations, mode);
-  if (mode === 'transit') return providers.routing.matrix(origins, destinations, mode, { arriveBy: meetAt });
-
-  const estimate = median(origins.flatMap((o) => destinations.map((d) => estimateMinutes(o, d, mode).durationMin)));
-  const timing = (minutes: number): RouteTiming => ({ departAt: new Date(meetAt.getTime() - minutes * 60_000) });
-  const first = await providers.routing.matrix(origins, destinations, mode, timing(estimate));
-  if (!config.refineTraffic) return first;
-  const actual = median(first.flat().flatMap((c) => (c && !c.estimated && Number.isFinite(c.durationMin) ? [c.durationMin] : [])));
-  if (!Number.isFinite(actual) || Math.abs(actual - estimate) < SEARCH.refineThresholdMin) return first;
-  return providers.routing.matrix(origins, destinations, mode, timing(actual));
+  if (mode === 'transit' && meetAt) return providers.routing.matrix(origins, destinations, mode, { arriveBy: meetAt });
+  return providers.routing.matrix(origins, destinations, mode);
 }
 
 /** Μαγαζιά γύρω από ένα σημείο: η ακτίνα μεγαλώνει μέχρι να βρεθούν αρκετά κατάλληλα */
@@ -314,3 +304,11 @@ const roundTravel = (t: TravelEstimate): TravelEstimate => ({
   durationMin: Math.round(t.durationMin),
   distanceKm: Math.round(t.distanceKm * 10) / 10,
 });
+
+/** «Χωρίς βαθμολογίες» όταν κανένα μαγαζί δεν έχει · «© OpenStreetMap» όταν κάποιο είναι από OSM */
+export function venueNotices(venues: Venue[]): ResultNotices {
+  const n: ResultNotices = {};
+  if (venues.length && venues.every((v) => v.rating == null)) n.basicVenues = true;
+  if (venues.some((v) => v.fromOsm || v.source === 'osm')) n.osmData = true;
+  return n;
+}

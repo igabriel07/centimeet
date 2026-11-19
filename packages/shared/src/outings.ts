@@ -30,6 +30,8 @@ export const OutingParticipantRowSchema = z.object({
     .object({
       mode: z.string().optional(),
       durationMin: z.number().optional(),
+      /** Εκτίμηση (π.χ. συγκοινωνίες χωρίς Google) → «~» */
+      estimated: z.boolean().optional(),
       distanceKm: z.number().optional(),
       costEur: z.number().optional(),
       navigationUrl: z.string().optional(),

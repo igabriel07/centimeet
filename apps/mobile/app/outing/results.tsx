@@ -5,6 +5,7 @@ import { useRef, useState, type ComponentRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert, Pressable, ScrollView, View } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
+import { anyEstimated, OsmAttribution, tilde } from '@/components/OsmAttribution';
 import { PeopleLegend, PersonMarkers, type MapPerson } from '@/components/PeopleOnMap';
 import { Body, Button, Card, Label, Row, Screen, useResponsive, useTheme } from '@/components/ui';
 import { api, ApiError } from '@/lib/api';
@@ -46,7 +47,7 @@ export default function Results() {
       {suggestions.primary.length ? <Label>{`${t('results.primary')} · ${primaryArea.label}`}</Label> : null}
       {suggestions.primary.length ? (
         <Body muted style={{ marginBottom: 10 }}>
-          {t('results.areaSummary', { min: primaryArea.minMin, max: primaryArea.maxMin, radius: primaryArea.radiusM })}
+          {t('results.areaSummary', { min: `${tilde(anyEstimated(primaryArea.travel))}${primaryArea.minMin}`, max: primaryArea.maxMin, radius: primaryArea.radiusM })}
         </Body>
       ) : null}
       {suggestions.primary.map((s) => (
@@ -56,7 +57,7 @@ export default function Results() {
       {altAreas.map((a) => (
         <View key={a.id} style={{ marginBottom: 8 }}>
           <Body style={{ fontWeight: '700', marginBottom: 6 }}>
-            📍 {a.label} · <Body muted>{t('results.range', { min: a.minMin, max: a.maxMin })}</Body>
+            📍 {a.label} · <Body muted>{t('results.range', { min: `${tilde(anyEstimated(a.travel))}${a.minMin}`, max: a.maxMin })}</Body>
           </Body>
           {a.hasVenues ? (
             suggestions.alternatives
@@ -67,6 +68,7 @@ export default function Results() {
           )}
         </View>
       ))}
+      {notices.osmData ? <OsmAttribution /> : null}
     </ScrollView>
   );
 
@@ -100,7 +102,7 @@ export default function Results() {
               key={a.id}
               coordinate={{ latitude: a.center.lat, longitude: a.center.lng }}
               title={a.label}
-              description={t('results.range', { min: a.minMin, max: a.maxMin })}
+              description={t('results.range', { min: `${tilde(anyEstimated(a.travel))}${a.minMin}`, max: a.maxMin })}
               pinColor={a.isPrimary ? c.venue : c.muted}
             />
           ))
@@ -110,7 +112,7 @@ export default function Results() {
           key={s.venue.id}
           coordinate={{ latitude: s.venue.location.lat, longitude: s.venue.location.lng }}
           title={s.venue.name}
-          description={t('results.range', { min: s.minMin, max: s.maxMin })}
+          description={t('results.range', { min: `${tilde(anyEstimated(s.travel))}${s.minMin}`, max: s.maxMin })}
           onCalloutPress={() => router.push(`/outing/venue/${encodeURIComponent(s.venue.id)}`)}
         />
       ))}
@@ -177,14 +179,14 @@ function SpotCard({ area }: { area: SuggestionArea }) {
     <Card>
       <Body style={{ fontWeight: '700', fontSize: 17 }}>📍 {area.label}</Body>
       <Body muted style={{ marginTop: 4 }}>
-        {t('results.spotSummary', { min: area.minMin, max: area.maxMin, km: avgKm.toFixed(1) })}
+        {t('results.spotSummary', { min: `${tilde(anyEstimated(area.travel))}${area.minMin}`, max: area.maxMin, km: avgKm.toFixed(1) })}
       </Body>
       <View style={{ marginTop: 10, gap: 4 }}>
         {area.travel.map((x) => (
           <Row key={x.participantId} style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
             <Body style={{ flexShrink: 1 }}>{name(x.participantId)}</Body>
             <Body muted>
-              {t('results.personTrip', { min: x.durationMin, km: x.distanceKm, cost: x.costEur > 0 ? ` · ${x.costEur.toFixed(2)}€` : '' })}
+              {t('results.personTrip', { min: `${tilde(x.estimated)}${x.durationMin}`, km: x.distanceKm, cost: x.costEur > 0 ? ` · ${x.costEur.toFixed(2)}€` : '' })}
             </Body>
           </Row>
         ))}
@@ -251,7 +253,7 @@ function VenueCard({ s, area, groupSize }: { s: ScoredVenue; area?: string; grou
           .filter(Boolean)
           .join(' · ')}
       </Body>
-      <Body style={{ marginTop: 6 }}>⏱ {t('results.range', { min: s.minMin, max: s.maxMin })}</Body>
+      <Body style={{ marginTop: 6 }}>⏱ {t('results.range', { min: `${tilde(anyEstimated(s.travel))}${s.minMin}`, max: s.maxMin })}</Body>
     </Card>
   );
 }

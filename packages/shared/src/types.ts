@@ -60,8 +60,10 @@ export type Venue = {
   reservable?: boolean;
   /** Κατάλληλο για παρέες */
   goodForGroups?: boolean;
-  /** 'osm' = εφεδρική πηγή χωρίς βαθμολογίες (όταν εξαντληθεί το δωρεάν όριο Google) */
+  /** 'osm' = χωρίς βαθμολογίες (μόνο OpenStreetMap) · 'google' = με βαθμολογίες Google */
   source?: 'google' | 'osm';
+  /** Τα βασικά στοιχεία (όνομα, θέση) είναι από OpenStreetMap → απαιτείται «© OpenStreetMap contributors» */
+  fromOsm?: boolean;
 };
 
 export type TravelEstimate = {
@@ -69,6 +71,8 @@ export type TravelEstimate = {
   durationMin: number;
   distanceKm: number;
   costEur: number;
+  /** Εκτίμηση από απόσταση, όχι πραγματική διαδρομή (εμφανίζεται με «~») */
+  estimated?: boolean;
 };
 
 export type CrowdReason = 'peak_time' | 'very_popular' | 'large_group' | 'not_group_friendly';
@@ -121,8 +125,10 @@ export type SuggestionArea = {
 export type ResultNotices = {
   /** Κάποιοι χρόνοι είναι εκτίμηση απόστασης, όχι πραγματική διαδρομή */
   estimatedTimes?: boolean;
-  /** Τα μαγαζιά είναι από OpenStreetMap, χωρίς βαθμολογίες */
+  /** Τα μαγαζιά είναι χωρίς βαθμολογίες (μόνο OpenStreetMap) */
   basicVenues?: boolean;
+  /** Δεδομένα από OpenStreetMap → «© OpenStreetMap contributors» (υποχρεωτικό) */
+  osmData?: boolean;
 };
 
 export type SuggestionsResponse = {
@@ -160,6 +166,8 @@ export type ParticipantPlan = {
   name: string;
   mode: TransportMode;
   durationMin: number;
+  /** Ο χρόνος είναι εκτίμηση (π.χ. συγκοινωνίες χωρίς Google) → «~» */
+  estimated?: boolean;
   distanceKm: number;
   costEur: number;
   costNote: string;
