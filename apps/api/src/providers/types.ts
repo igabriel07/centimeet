@@ -1,5 +1,5 @@
 import type {
-  Activity,
+  ActivityCategory,
   LatLng,
   ParkingOption,
   PlaceSuggestion,
@@ -7,6 +7,7 @@ import type {
   TransitStep,
   TransportMode,
   Venue,
+  VenueActivity,
 } from '@centimeet/shared';
 
 /** null = δεν υπάρχει διαδρομή · estimated = εκτίμηση απόστασης (εφεδρική λειτουργία), όχι πραγματική διαδρομή */
@@ -31,8 +32,8 @@ export interface Geocoder {
 }
 
 export interface PlacesProvider extends Geocoder {
-  /** Μαγαζιά της δραστηριότητας γύρω από ένα σημείο */
-  searchVenues(center: LatLng, activity: Activity, radiusM: number, max: number): Promise<Venue[]>;
+  /** Μαγαζιά της δραστηριότητας (και προαιρετικά της κατηγορίας, π.χ. πίτσα) γύρω από ένα σημείο */
+  searchVenues(center: LatLng, activity: VenueActivity, radiusM: number, max: number, category?: ActivityCategory): Promise<Venue[]>;
   getVenue(placeId: string): Promise<Venue | null>;
   searchParking(center: LatLng, radiusM: number): Promise<ParkingOption[]>;
 }

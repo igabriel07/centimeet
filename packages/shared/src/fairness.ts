@@ -33,10 +33,58 @@ export function travelStats(travel: TravelEstimate[]) {
   return { max, min, avg, spread: max - min, avgCost };
 }
 
-/** Κόστος «αδικίας» ενός σημείου (μικρότερο = καλύτερο) */
-export function pointFairnessCost(travel: TravelEstimate[], w: PointWeights = POINT_WEIGHTS): number {
-  const s = travelStats(travel);
+/**
+ * Χρόνος/κόστος/απόσταση κάθε ατόμου πολλαπλασιασμένα με το βάρος της προτίμησής του
+ * («κοντά μου» ×2, «οπουδήποτε» ×0.25). Χωρίς βάρη = όπως είναι.
+ */
+export function weightTravel(travel: TravelEstimate[], weights?: readonly number[]): TravelEstimate[] {
+  if (!weights) return travel;
+  return travel.map((t, i) => {
+    const w = weights[i] ?? 1;
+    return { ...t, durationMin: t.durationMin * w, distanceKm: t.distanceKm * w, costEur: t.costEur * w };
+  });
+}
+
+/**
+ * Κόστος «αδικίας» ενός σημείου (μικρότερο = καλύτερο).
+ * `weights`: βάρος ανά άτομο (ίδια σειρά με το travel) από την προτίμηση «πού πάμε».
+ */
+export function pointFairnessCost(travel: TravelEstimate[], w: PointWeights = POINT_WEIGHTS, weights?: readonly number[]): number {
+  const s = travelStats(weightTravel(travel, weights));
   return w.max * s.max + w.spread * s.spread + w.avg * s.avg + w.costMinPerEur * s.avgCost;
+}
+
+/**
+ * «Σημείο» (spot): κατάταξη με 1ο κριτήριο την απόσταση, 2ο τον χρόνο, 3ο το κόστος.
+ * Κάθε κριτήριο μετρά «αδικία» όπως ο χρόνος: μέγιστο + διαφορά + μέσος όρος.
+ * Μικρές διαφορές (κάτω από ένα «βήμα») θεωρούνται ισοπαλία ώστε να αποφασίσει το επόμενο κριτήριο —
+ * αλλιώς 10 μέτρα διαφορά θα έκριναν πάντα, και ο χρόνος/κόστος δεν θα μετρούσαν ποτέ.
+ */
+export const SPOT_STEPS = { distanceKm: 0.3, minutes: 2 } as const;
+
+const fairnessOf = (xs: number[]) => {
+  const max = Math.max(...xs);
+  const min = Math.min(...xs);
+  const avg = xs.reduce((a, b) => a + b, 0) / xs.length;
+  return POINT_WEIGHTS.max * max + POINT_WEIGHTS.spread * (max - min) + POINT_WEIGHTS.avg * avg;
+};
+
+/** [απόσταση, χρόνος, κόστος] — συγκρίνεται λεξικογραφικά */
+export function spotRankKey(travel: TravelEstimate[], steps = SPOT_STEPS, weights?: readonly number[]): [number, number, number] {
+  if (travel.length === 0) throw new Error('spotRankKey: empty travel list');
+  travel = weightTravel(travel, weights);
+  return [
+    Math.round(fairnessOf(travel.map((t) => t.distanceKm)) / steps.distanceKm),
+    Math.round(fairnessOf(travel.map((t) => t.durationMin)) / steps.minutes),
+    travel.reduce((a, t) => a + t.costEur, 0) / travel.length,
+  ];
+}
+
+export function compareSpotKeys(a: readonly number[], b: readonly number[]): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    if (a[i] !== b[i]) return a[i]! - b[i]!;
+  }
+  return 0;
 }
 
 /** Μέση βαθμολογία πόλης και «βάρος» της (σε κριτικές) για τη σταθμισμένη βαθμολογία */

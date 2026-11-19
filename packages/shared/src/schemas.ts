@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { ACTIVITIES, CITIES, TRANSPORT_MODES } from './types';
+import { ALL_CATEGORIES, isValidCategory, type ActivityCategory } from './categories';
+import { ACTIVITIES, CITIES, PLACE_PREFERENCES, TRANSPORT_MODES } from './types';
 
 /** Μέγιστο μέγεθος παρέας */
 export const MAX_PARTICIPANTS = 20;
@@ -14,11 +15,15 @@ export const ParticipantSchema = z.object({
   name: z.string().min(1).max(60),
   origin: LatLngSchema,
   mode: z.enum(TRANSPORT_MODES),
+  /** «Πού θέλεις να πάμε;» — χωρίς = στη μέση */
+  preference: z.enum(PLACE_PREFERENCES).optional(),
 });
 
-export const SuggestRequestSchema = z.object({
+const SuggestRequestBase = z.object({
   city: z.enum(CITIES),
   activity: z.enum(ACTIVITIES),
+  /** Κατηγορία της δραστηριότητας (π.χ. 'pizza' για food) — χωρίς = «Όλα» */
+  category: z.enum(ALL_CATEGORIES as [ActivityCategory, ...ActivityCategory[]]).optional(),
   /** ISO ώρα ΣΥΝΑΝΤΗΣΗΣ (άφιξης στο μαγαζί) – προαιρετική. Χωρίς αυτή = «τώρα». */
   departAt: z.iso.datetime({ offset: true }).optional(),
   participants: z.array(ParticipantSchema).min(2).max(MAX_PARTICIPANTS),
@@ -31,6 +36,11 @@ export const SuggestRequestSchema = z.object({
     })
     .optional(),
 });
+
+const categoryMatchesActivity = (r: { activity: (typeof ACTIVITIES)[number]; category?: string }) => isValidCategory(r.activity, r.category);
+const categoryIssue = { message: 'category does not belong to activity', path: ['category'] };
+
+export const SuggestRequestSchema = SuggestRequestBase.refine(categoryMatchesActivity, categoryIssue);
 export type SuggestRequest = z.infer<typeof SuggestRequestSchema>;
 
 export const VenuePlanRequestSchema = z.object({
@@ -49,7 +59,7 @@ export const TravelEstimateSchema = z.object({
 });
 
 /** «Δες μαγαζιά εδώ» για εναλλακτική περιοχή (οι χρόνοι έρχονται από την αρχική απάντηση) */
-export const AreaVenuesRequestSchema = SuggestRequestSchema.extend({
+export const AreaVenuesRequestSchema = SuggestRequestBase.extend({
   area: z.object({
     id: z.string().min(1).max(64),
     label: z.string().max(80),
@@ -58,5 +68,5 @@ export const AreaVenuesRequestSchema = SuggestRequestSchema.extend({
   }),
   /** Μαγαζιά που εμφανίζονται ήδη (να μην ξαναβγούν) */
   excludeIds: z.array(z.string().max(300)).max(100).optional(),
-});
+}).refine(categoryMatchesActivity, categoryIssue);
 export type AreaVenuesRequest = z.infer<typeof AreaVenuesRequestSchema>;

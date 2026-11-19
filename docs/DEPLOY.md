@@ -93,6 +93,26 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=…
 EXPO_PUBLIC_API_URL=https://centimeet-api-xxxxx.europe-west1.run.app
 ```
 
+## 5. Σύνδεση με Google (δωρεάν)
+
+Η εφαρμογή δείχνει «Συνέχεια με Google» / «Εγγραφή με Google». Μέχρι να ενεργοποιηθεί, το κουμπί
+απαντά «δεν είναι ακόμα διαθέσιμη» (το ελέγχει από το `/auth/v1/settings` του Supabase).
+
+1. Google Cloud Console (ίδιο project) → **Google Auth Platform → Branding**: όνομα «CentiMeet», email υποστήριξης,
+   λογότυπο προαιρετικά. **Audience → External** και **Publish app** (για τα βασικά scopes `email`, `profile`
+   δεν χρειάζεται έλεγχος από το Google).
+2. **Clients → Create client → Web application**:
+   - *Authorized redirect URIs*: `https://<PROJECT>.supabase.co/auth/v1/callback`
+3. Στο `supabase/.env`: `GOOGLE_OAUTH_CLIENT_ID=…` και `GOOGLE_OAUTH_SECRET=…`
+4. Στο `supabase/config.toml` → `[auth.external.google] enabled = true` → `supabase config push`.
+
+Redirect URLs της εφαρμογής (`additional_redirect_urls`): `centimeet://**` (builds), `exp://**` (Expo Go)
+και `http://localhost:8081/**` (προεπισκόπηση στον browser). Τα δύο τελευταία είναι μόνο για ανάπτυξη —
+αφαιρέστε τα πριν το δημόσιο λανσάρισμα.
+
+> **iOS:** η Apple απαιτεί «Sign in with Apple» όταν μια εφαρμογή προσφέρει σύνδεση με Google
+> (App Review 4.8). Χρειάζεται τον λογαριασμό Apple Developer — προστίθεται πριν το πρώτο build iOS.
+
 ## Παρακολούθηση κόστους
 
 Οι μετρητές του μήνα είναι στον πίνακα `api_usage` (Supabase → Table editor):

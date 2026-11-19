@@ -14,12 +14,16 @@
  */
 import {
   CITY_CONFIG,
+  compareSpotKeys,
   crowdHint,
   estimateMinutes,
   haversineKm,
   isOpenAt,
+  isVenueActivity,
   pointFairnessCost,
+  preferenceWeight,
   rankVenuesByQuality,
+  spotRankKey,
   travelStats,
   walkMinutes,
   type AreaVenuesRequest,
@@ -33,6 +37,7 @@ import {
   type SuggestionsResponse,
   type TransportMode,
   type TravelEstimate,
+  type VenueActivity,
   type Venue,
 } from '@centimeet/shared';
 import type { MatrixCell, Providers, RouteTiming } from '../providers/types';
@@ -49,7 +54,6 @@ export const SEARCH = {
   /** Το μαγαζί πρέπει να μένει ανοιχτό τουλάχιστον τόσο μετά την άφιξη */
   stayMin: 60,
   /** Αν ο πραγματικός χρόνος οδήγησης απέχει τόσο από την εκτίμηση, ξαναρωτάμε με σωστή ώρα αναχώρησης */
-  refineThresholdMin: 10,
 } as const;
 
 export type SuggestOptions = { config?: EngineConfig; now?: Date };
@@ -72,24 +76,35 @@ export async function suggest(req: SuggestRequest, providers: Providers, opts: S
   // 2. Πραγματικοί χρόνοι
   const { travel, estimated } = await travelToPoints(req, candidates, providers, meetAt, config);
 
+  const notices: ResultNotices = estimated ? { estimatedTimes: true } : {};
+  // «Πού θέλεις να πάμε;»: βάρος ανά άτομο (ίδια σειρά με το travel)
+  const weights = req.participants.map((p) => preferenceWeight(p.preference));
+
+  // «Σημείο»: μόνο σημείο συνάντησης, κατάταξη απόσταση → χρόνος → κόστος, χωρίς μαγαζιά
+  if (!isVenueActivity(req.activity)) {
+    const spots = candidates
+      .filter((c) => travel.has(c.id))
+      .map((c) => ({ c, travel: travel.get(c.id)!, key: spotRankKey(travel.get(c.id)!, undefined, weights) }))
+      .sort((a, b) => compareSpotKeys(a.key, b.key));
+    const areas = pickSeparated(spots).map((p, i) => toArea(i === 0 ? 'primary' : p.c.id, p.c, p.travel, i === 0, 0, false));
+    return { areas, primary: [], alternatives: [], notices };
+  }
+
+  const activity = req.activity;
+
   // 3. Δίκαιο σημείο + εναλλακτικά σε άλλες περιοχές
   const ranked = candidates
     .filter((c) => travel.has(c.id))
-    .map((c) => ({ c, travel: travel.get(c.id)!, cost: pointFairnessCost(travel.get(c.id)!) }))
+    .map((c) => ({ c, travel: travel.get(c.id)!, cost: pointFairnessCost(travel.get(c.id)!, undefined, weights) }))
     .sort((a, b) => a.cost - b.cost);
-  const picks: typeof ranked = [];
-  for (const r of ranked) {
-    if (picks.length > SEARCH.alternatives) break;
-    if (picks.every((p) => haversineKm(p.c.center, r.c.center) >= CANDIDATES.altMinSeparationKm)) picks.push(r);
-  }
-  const notices: ResultNotices = estimated ? { estimatedTimes: true } : {};
+  const picks = pickSeparated(ranked);
   if (picks.length === 0) return { areas: [], primary: [], alternatives: [], notices };
 
   // 4–5. Μαγαζιά: το κύριο πάντα· τα εναλλακτικά αμέσως ή «κατά παραγγελία»
   const withVenues = picks.map((_, i) => i === 0 || config.alternativesWithVenues);
   const found = await Promise.all(
     picks.map((p, i) =>
-      withVenues[i] ? findVenues(providers, p.c.center, req, at, i === 0 ? config.primaryRadiiM : config.altRadiiM) : null,
+      withVenues[i] ? findVenues(providers, p.c.center, req, activity, at, i === 0 ? config.primaryRadiiM : config.altRadiiM) : null,
     ),
   );
 
@@ -102,11 +117,21 @@ export async function suggest(req: SuggestRequest, providers: Providers, opts: S
     if (!found[i]) return perArea.push([]);
     const fresh = found[i]!.venues.filter((v) => !seen.has(v.id));
     fresh.forEach((v) => seen.add(v.id));
-    if (fresh.some((v) => v.source === 'osm')) notices.basicVenues = true;
+    Object.assign(notices, venueNotices(fresh));
     perArea.push(rankArea(req, area, fresh, at).slice(0, i === 0 ? SEARCH.primaryResults : SEARCH.altResultsPerArea));
   });
 
   return { areas, primary: perArea[0] ?? [], alternatives: perArea.slice(1).flat(), notices };
+}
+
+/** Το καλύτερο σημείο + εναλλακτικά που απέχουν αρκετά μεταξύ τους (άλλη περιοχή) */
+function pickSeparated<T extends { c: CandidatePoint }>(ranked: T[]): T[] {
+  const picks: T[] = [];
+  for (const r of ranked) {
+    if (picks.length > SEARCH.alternatives) break;
+    if (picks.every((p) => haversineKm(p.c.center, r.c.center) >= CANDIDATES.altMinSeparationKm)) picks.push(r);
+  }
+  return picks;
 }
 
 /** «Δες μαγαζιά εδώ»: μαγαζιά για μια εναλλακτική περιοχή που ήρθε χωρίς μαγαζιά */
@@ -114,13 +139,16 @@ export async function areaVenues(req: AreaVenuesRequest, providers: Providers, o
   const config = opts.config ?? ENGINE_PROFILES.growth;
   const at = req.departAt ? new Date(req.departAt) : (opts.now ?? new Date());
   const exclude = new Set(req.excludeIds ?? []);
-  const found = await findVenues(providers, req.area.center, req, at, config.altRadiiM);
+  if (!isVenueActivity(req.activity)) {
+    return { area: toArea(req.area.id, req.area, req.area.travel, false, 0, false), venues: [], notices: {} };
+  }
+  const found = await findVenues(providers, req.area.center, req, req.activity, at, config.altRadiiM);
   const area = toArea(req.area.id, req.area, req.area.travel, false, found.radiusM, true);
   const venues = found.venues.filter((v) => !exclude.has(v.id));
   return {
     area,
     venues: rankArea(req, area, venues, at).slice(0, SEARCH.primaryResults),
-    notices: venues.some((v) => v.source === 'osm') ? { basicVenues: true } : {},
+    notices: venueNotices(venues),
   };
 }
 
@@ -188,7 +216,7 @@ async function travelToPoints(
   await Promise.all(
     [...groups.entries()].map(async ([mode, people]) => {
       const origins = people.map((p) => p.origin);
-      const m = await matrixFor(providers, mode, origins, destinations, meetAt, config);
+      const m = await matrixFor(providers, mode, origins, destinations, meetAt);
       people.forEach((person, oi) => {
         points.forEach((pt, di) => {
           const cell = m[oi]?.[di];
@@ -203,6 +231,7 @@ async function travelToPoints(
             durationMin: trip.durationMin,
             distanceKm: trip.distanceKm,
             costEur: trip.costEur,
+            ...(cell.estimated ? { estimated: true } : {}),
           });
         });
       });
@@ -219,11 +248,10 @@ async function travelToPoints(
 }
 
 /**
- * Matrix με τον σωστό χρονισμό:
- *  - οχήματα + ώρα συνάντησης: το Google δέχεται μόνο ώρα ΑΝΑΧΩΡΗΣΗΣ, οπότε
- *    αναχώρηση = συνάντηση − εκτιμώμενη διάρκεια· (growth) αν η πραγματική διάρκεια απέχει πολύ, ξαναρωτάμε
- *  - συγκοινωνίες + ώρα συνάντησης: ώρα ΑΦΙΞΗΣ
- *  - αλλιώς «τώρα», χωρίς κίνηση
+ * Matrix με τον σωστό χρονισμό — ΧΩΡΙΣ κίνηση (Google: Essentials $5/1000 αντί Pro $10/1000):
+ *  - συγκοινωνίες + ώρα συνάντησης: ώρα ΑΦΙΞΗΣ (δρομολόγια — δεν αλλάζει τη χρέωση)
+ *  - όλα τα άλλα: «τώρα», χωρίς κίνηση
+ * Η κίνηση υπολογίζεται μόνο στο πλάνο του μαγαζιού που διαλέγει η παρέα (venue-plan, λίγες κλήσεις).
  */
 async function matrixFor(
   providers: Providers,
@@ -231,18 +259,9 @@ async function matrixFor(
   origins: LatLng[],
   destinations: LatLng[],
   meetAt: Date | undefined,
-  config: EngineConfig,
 ): Promise<MatrixCell[][]> {
-  if (!meetAt || mode === 'walk' || mode === 'bike') return providers.routing.matrix(origins, destinations, mode);
-  if (mode === 'transit') return providers.routing.matrix(origins, destinations, mode, { arriveBy: meetAt });
-
-  const estimate = median(origins.flatMap((o) => destinations.map((d) => estimateMinutes(o, d, mode).durationMin)));
-  const timing = (minutes: number): RouteTiming => ({ departAt: new Date(meetAt.getTime() - minutes * 60_000) });
-  const first = await providers.routing.matrix(origins, destinations, mode, timing(estimate));
-  if (!config.refineTraffic) return first;
-  const actual = median(first.flat().flatMap((c) => (c && !c.estimated && Number.isFinite(c.durationMin) ? [c.durationMin] : [])));
-  if (!Number.isFinite(actual) || Math.abs(actual - estimate) < SEARCH.refineThresholdMin) return first;
-  return providers.routing.matrix(origins, destinations, mode, timing(actual));
+  if (mode === 'transit' && meetAt) return providers.routing.matrix(origins, destinations, mode, { arriveBy: meetAt });
+  return providers.routing.matrix(origins, destinations, mode);
 }
 
 /** Μαγαζιά γύρω από ένα σημείο: η ακτίνα μεγαλώνει μέχρι να βρεθούν αρκετά κατάλληλα */
@@ -250,13 +269,14 @@ async function findVenues(
   providers: Providers,
   center: LatLng,
   req: SuggestRequest,
+  activity: VenueActivity,
   at: Date,
   radii: readonly number[],
 ): Promise<{ venues: Venue[]; radiusM: number }> {
   const tz = CITY_CONFIG[req.city].timeZone;
   let last: { venues: Venue[]; radiusM: number } = { venues: [], radiusM: radii[0] ?? 300 };
   for (const radiusM of radii) {
-    const list = await providers.places.searchVenues(center, req.activity, radiusM, 20);
+    const list = await providers.places.searchVenues(center, activity, radiusM, 20, req.category);
     last = { venues: list.filter((v) => passesFilters(v, req.filters, at, tz)), radiusM };
     if (last.venues.length >= SEARCH.minVenues) break;
   }
@@ -284,3 +304,11 @@ const roundTravel = (t: TravelEstimate): TravelEstimate => ({
   durationMin: Math.round(t.durationMin),
   distanceKm: Math.round(t.distanceKm * 10) / 10,
 });
+
+/** «Χωρίς βαθμολογίες» όταν κανένα μαγαζί δεν έχει · «© OpenStreetMap» όταν κάποιο είναι από OSM */
+export function venueNotices(venues: Venue[]): ResultNotices {
+  const n: ResultNotices = {};
+  if (venues.length && venues.every((v) => v.rating == null)) n.basicVenues = true;
+  if (venues.some((v) => v.fromOsm || v.source === 'osm')) n.osmData = true;
+  return n;
+}

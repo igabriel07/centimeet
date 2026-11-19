@@ -53,7 +53,7 @@ describe('crowdHint (εκτίμηση Φάσης 1)', () => {
     expect(isPeak('drinks', fridayDrinks, TZ)).toBe(true);
     expect(isPeak('drinks', athens('2026-11-21T01:30:00'), TZ)).toBe(true); // Σάββατο 01:30, συνέχεια Παρασκευής
     expect(isPeak('drinks', tuesdayAfternoon, TZ)).toBe(false);
-    expect(isPeak('brunch', athens('2026-11-22T12:00:00'), TZ)).toBe(true);
+    expect(isPeak('food', athens('2026-11-22T12:00:00'), TZ)).toBe(true);
   });
 
   it('15 άτομα, δημοφιλές, ώρα αιχμής → πρόταση για τηλέφωνο', () => {

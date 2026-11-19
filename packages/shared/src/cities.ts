@@ -19,8 +19,13 @@ export type CityConfig = {
   center: LatLng;
   /** Ζώνη ώρας (για ωράρια μαγαζιών και ώρες αιχμής) */
   timeZone: string;
-  /** Ακτίνα (km) εντός της οποίας δεχόμαστε αφετηρίες */
+  /** Ακτίνα (km) γύρω από το κέντρο όπου δεχόμαστε πάντα αφετηρίες */
   serviceRadiusKm: number;
+  /**
+   * Νομός/περιφέρεια: δεχόμαστε και αφετηρίες μέσα σε αυτό το (χοντρικό) πολύγωνο,
+   * π.χ. ένα χωριό της Θεσσαλονίκης μετράει σαν Θεσσαλονίκη.
+   */
+  region: { label: string; polygon: LatLng[] };
   /** Γνωστοί κόμβοι – χρησιμοποιούνται ως «εναλλακτικές περιοχές» */
   hubs: TransitHub[];
   transit: { singleTicketEur: number; note: string };
@@ -36,6 +41,25 @@ export const CITY_CONFIG: Record<CityId, CityConfig> = {
     center: { lat: 37.9838, lng: 23.7275 },
     timeZone: 'Europe/Athens',
     serviceRadiusKm: 35,
+    // Αττική (ηπειρωτική + Σαλαμίνα) — όχι Εύβοια / Κορινθία
+    region: {
+      label: 'Αττικής',
+      polygon: [
+        { lat: 38.33, lng: 23.62 },
+        { lat: 38.36, lng: 23.85 },
+        { lat: 38.25, lng: 24.08 },
+        { lat: 38.0, lng: 24.1 },
+        { lat: 37.62, lng: 24.08 },
+        { lat: 37.6, lng: 23.95 },
+        { lat: 37.8, lng: 23.7 },
+        { lat: 37.85, lng: 23.4 },
+        { lat: 37.92, lng: 23.3 },
+        { lat: 37.95, lng: 23.1 },
+        { lat: 38.1, lng: 23.1 },
+        { lat: 38.25, lng: 23.25 },
+        { lat: 38.3, lng: 23.45 },
+      ],
+    },
     hubs: [
       { id: 'syntagma', label: 'Σύνταγμα', location: { lat: 37.9755, lng: 23.7348 } },
       { id: 'monastiraki', label: 'Μοναστηράκι', location: { lat: 37.9761, lng: 23.7257 } },
@@ -70,6 +94,24 @@ export const CITY_CONFIG: Record<CityId, CityConfig> = {
     center: { lat: 40.6401, lng: 22.9444 },
     timeZone: 'Europe/Athens',
     serviceRadiusKm: 25,
+    // Νομός Θεσσαλονίκης — όχι Χαλκιδική / Κιλκίς / Ημαθία
+    region: {
+      label: 'ν. Θεσσαλονίκης',
+      polygon: [
+        { lat: 40.95, lng: 22.55 },
+        { lat: 40.97, lng: 23.1 },
+        { lat: 40.9, lng: 23.45 },
+        { lat: 40.8, lng: 23.75 },
+        { lat: 40.7, lng: 23.8 },
+        { lat: 40.62, lng: 23.4 },
+        { lat: 40.55, lng: 23.2 },
+        { lat: 40.4, lng: 23.05 },
+        { lat: 40.4, lng: 22.85 },
+        { lat: 40.52, lng: 22.8 },
+        { lat: 40.58, lng: 22.62 },
+        { lat: 40.7, lng: 22.48 },
+      ],
+    },
     hubs: [
       { id: 'aristotelous', label: 'Πλ. Αριστοτέλους', location: { lat: 40.6325, lng: 22.9408 } },
       { id: 'ladadika', label: 'Λαδάδικα', location: { lat: 40.6357, lng: 22.9358 } },
@@ -97,4 +139,21 @@ export function parkingSearchMinutes(city: CityId, mode: TransportMode, at: LatL
   const zone = p.zones.find((z) => haversineKm(z.center, at) <= z.radiusKm);
   if (mode === 'car') return zone?.carMin ?? p.carMin;
   return zone?.motorbikeMin ?? p.motorbikeMin;
+}
+
+/** Σημείο μέσα σε πολύγωνο (ray casting) */
+export function pointInPolygon(p: LatLng, poly: readonly LatLng[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i]!;
+    const b = poly[j]!;
+    if (a.lat > p.lat !== b.lat > p.lat && p.lng < ((b.lng - a.lng) * (p.lat - a.lat)) / (b.lat - a.lat) + a.lng) inside = !inside;
+  }
+  return inside;
+}
+
+/** Αφετηρία αποδεκτή για την πόλη: κοντά στο κέντρο ή μέσα στον νομό */
+export function inServiceArea(city: CityId, p: LatLng): boolean {
+  const cfg = CITY_CONFIG[city];
+  return haversineKm(p, cfg.center) <= cfg.serviceRadiusKm || pointInPolygon(p, cfg.region.polygon);
 }

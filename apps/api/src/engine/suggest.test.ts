@@ -1,10 +1,18 @@
 import { haversineKm, pointFairnessCost, type LatLng, type SuggestRequest, type TransportMode, type Venue } from '@centimeet/shared';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { MockProvider } from '../providers/mock';
 import type { MatrixCell, PlacesProvider, Providers, RouteTiming, RoutingProvider } from '../providers/types';
 import { venuePlan } from './plan';
 import { ENGINE_PROFILES } from './config';
 import { SEARCH, suggest } from './suggest';
+
+// Σταθερή «τώρα» (Παρασκευή 20:00 ώρα Ελλάδας): τα tests χωρίς ώρα συνάντησης δεν πρέπει
+// να αποτυγχάνουν όταν τρέχουν νύχτα (τα μαγαζιά «κλειστά» → καμία πρόταση).
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-11-13T18:00:00Z'));
+});
+afterAll(() => vi.useRealTimers());
 
 const ATHENS = {
   kifisia: { lat: 38.0736, lng: 23.8114 },
@@ -73,25 +81,31 @@ describe('suggest — σημείο συνάντησης', () => {
     expect(matrixCalls.every((c) => c.timing === undefined)).toBe(true);
   });
 
-  it('με ώρα συνάντησης: συγκοινωνίες με ώρα άφιξης, οχήματα με ώρα αναχώρησης νωρίτερα, πόδια χωρίς', async () => {
+  it('με ώρα συνάντησης: συγκοινωνίες με ώρα άφιξης· οχήματα & πόδια ΧΩΡΙΣ κίνηση (Essentials)', async () => {
     const { providers, matrixCalls } = spy();
     await suggest(req({ departAt: FRIDAY_9PM }), providers);
-    const meet = new Date(FRIDAY_9PM).getTime();
     expect(matrixCalls.find((c) => c.mode === 'transit')!.timing).toEqual({ arriveBy: new Date(FRIDAY_9PM) });
     const car = matrixCalls.filter((c) => c.mode === 'car');
-    expect(car.length).toBeGreaterThan(0);
-    for (const c of car) expect(c.timing!.departAt!.getTime()).toBeLessThan(meet);
+    expect(car).toHaveLength(1);
+    expect(car[0]!.timing).toBeUndefined();
     expect(matrixCalls.find((c) => c.mode === 'walk')!.timing).toBeUndefined();
   });
 
-  it('αν η κίνηση αλλάζει πολύ τον χρόνο, ξαναρωτά με σωστή ώρα αναχώρησης (μία φορά)', async () => {
+  it('μία μόνο κλήση matrix ανά μέσο (καμία δεύτερη «διόρθωση κίνησης»)', async () => {
     const slowTraffic: RoutingProvider['matrix'] = async (origins, destinations) =>
       origins.map(() => destinations.map(() => ({ durationMin: 75, distanceKm: 20 })));
     const { providers, matrixCalls } = spy({ matrix: slowTraffic });
     await suggest(req({ departAt: FRIDAY_9PM }), providers);
-    const car = matrixCalls.filter((c) => c.mode === 'car');
-    expect(car).toHaveLength(2);
-    expect(car[1]!.timing!.departAt!.getTime()).toBe(new Date(FRIDAY_9PM).getTime() - 75 * 60_000);
+    expect(matrixCalls.filter((c) => c.mode === 'car')).toHaveLength(1);
+  });
+
+  it('εκτιμώμενοι χρόνοι σημειώνονται ανά άτομο (για «~» στην εφαρμογή)', async () => {
+    const est: RoutingProvider['matrix'] = async (origins, destinations) =>
+      origins.map(() => destinations.map(() => ({ durationMin: 20, distanceKm: 5, estimated: true })));
+    const { providers } = spy({ matrix: est });
+    const res = await suggest(req(), providers);
+    expect(res.notices?.estimatedTimes).toBe(true);
+    expect(res.areas[0]!.travel.every((t) => t.estimated)).toBe(true);
   });
 
   it('το κύριο σημείο είναι το πιο δίκαιο· τα εναλλακτικά απέχουν ≥ 1.2 km', async () => {

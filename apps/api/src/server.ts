@@ -1,22 +1,34 @@
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
-import { AreaVenuesRequestSchema, CITY_CONFIG, SuggestRequestSchema, VenuePlanRequestSchema, CITIES } from '@centimeet/shared';
+import {
+  AreaVenuesRequestSchema,
+  CITY_CONFIG,
+  PopularVenuesRequestSchema,
+  rankPopular,
+  SuggestRequestSchema,
+  VenuePlanRequestSchema,
+  CITIES,
+  type PopularVenuesResponse,
+} from '@centimeet/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { Env } from './env';
+import { routingProvider, usesGoogle, venuesProvider, type Env } from './env';
 import { venuePlan, PARKING_RADIUS_M } from './engine/plan';
 import { ENGINE_PROFILES } from './engine/config';
 import { areaVenues, suggest } from './engine/suggest';
 import { outOfServiceArea } from './engine/areas';
 import { makeAuthHook } from './lib/auth';
-import { MemoryCache, type Cache } from './lib/cache';
+import { cached, MemoryCache, type Cache } from './lib/cache';
 import { dayKey, defaultLimits, MemoryUsageStore, SupabaseUsageStore, UsageGuard, type UsageStore } from './lib/usage';
 import { GoogleProvider } from './providers/google';
 import { GuardedProvider } from './providers/guarded';
 import { MockProvider } from './providers/mock';
 import { mergeParking, osmParking } from './providers/osm';
 import { PhotonGeocoder } from './providers/photon';
-import type { Geocoder, PlacesProvider, Providers } from './providers/types';
+import { EstimateRouting } from './providers/estimate';
+import { HybridPlaces, OsmPlaces } from './providers/osmVenues';
+import { OsrmRouting } from './providers/osrm';
+import type { Geocoder, PlacesProvider, Providers, RoutingProvider } from './providers/types';
 
 /** Ποια υπηρεσία κάνει αναζήτηση διευθύνσεων (auto: Photon στη λιτή λειτουργία — δωρεάν) */
 export function pickGeocoder(env: Env, cache: Cache, fallback: Geocoder): Geocoder {
@@ -40,39 +52,76 @@ function withGeocoder(places: PlacesProvider, geo: Geocoder): PlacesProvider {
   };
 }
 
+/**
+ * Ποιες πηγές χρησιμοποιούνται (βλ. .env: ROUTING_PROVIDER / VENUES_PROVIDER):
+ *  - χρόνοι:  google (με φρένο κόστους) · osrm (δωρεάν· συγκοινωνίες από Google αν υπάρχει κλειδί) · mock
+ *  - μαγαζιά: google · osm (δωρεάν) · hybrid (OSM + βαθμολογίες Google με μία κλήση) · mock
+ * Το Google (αν χρειάζεται) περνά ΠΑΝΤΑ από το «φρένο» κόστους (GuardedProvider).
+ */
 export function buildProviders(
   env: Env,
   cache: Cache,
   usage: UsageStore,
   log: (msg: string, extra?: Record<string, unknown>) => void = () => {},
+  fetchImpl: typeof fetch = fetch,
 ): { providers: Providers; findParking?: Parameters<typeof venuePlan>[2] } {
-  if (env.USE_MOCK_PROVIDERS) {
-    const m = new MockProvider();
-    return { providers: { places: withGeocoder(m, pickGeocoder(env, cache, m)), routing: m } };
+  const routingChoice = routingProvider(env);
+  const venuesChoice = venuesProvider(env);
+  const mock = new MockProvider();
+
+  // Google πίσω από το φρένο κόστους — μόνο όταν κάποια πηγή το χρειάζεται
+  let guarded: GuardedProvider | undefined;
+  if (usesGoogle(env) && env.GOOGLE_MAPS_API_KEY) {
+    const g = new GoogleProvider(env.GOOGLE_MAPS_API_KEY, cache, fetchImpl);
+    const guard = new UsageGuard(usage, defaultLimits(env.GOOGLE_BUDGET_FACTOR), undefined, (e) =>
+      log('usage store unavailable → Google blocked', { err: String(e) }),
+    );
+    guarded = new GuardedProvider(g, guard, pickGeocoder(env, cache, g), cache, log, fetchImpl, env.OVERPASS_URL);
   }
-  // Πραγματικό Google, πάντα πίσω από το «φρένο» κόστους
-  const g = new GoogleProvider(env.GOOGLE_MAPS_API_KEY, cache);
-  const guard = new UsageGuard(usage, defaultLimits(env.GOOGLE_BUDGET_FACTOR), undefined, (e) =>
-    log('usage store unavailable → Google blocked', { err: String(e) }),
-  );
-  const guarded = new GuardedProvider(g, guard, pickGeocoder(env, cache, g), cache, log);
-  return {
-    providers: { places: guarded, routing: guarded },
-    findParking: async (center) => {
-      const [google, osm] = await Promise.all([
-        guarded.searchParking(center, PARKING_RADIUS_M).catch(() => []),
-        osmParking(center, PARKING_RADIUS_M, cache).catch(() => []),
-      ]);
-      return mergeParking([google, osm]);
-    },
-  };
+  const geocoder = guarded ?? pickGeocoder(env, cache, mock);
+
+  const routing: RoutingProvider =
+    routingChoice === 'mock'
+      ? mock
+      : routingChoice === 'google'
+        ? guarded!
+        : new OsrmRouting(cache, guarded ?? new EstimateRouting(), env.OSRM_URL, fetchImpl, log);
+
+  const osm = () => new OsmPlaces(cache, geocoder, env.OVERPASS_URL, fetchImpl);
+  const places: PlacesProvider =
+    venuesChoice === 'mock'
+      ? withGeocoder(mock, geocoder)
+      : venuesChoice === 'google'
+        ? guarded!
+        : venuesChoice === 'osm'
+          ? osm()
+          : new HybridPlaces(osm(), guarded!, cache, log);
+
+  // Parking: με Google, συγχώνευση Google + OSM· αλλιώς μόνο OSM (δωρεάν, από τον PlacesProvider)
+  const findParking: Parameters<typeof venuePlan>[2] =
+    venuesChoice === 'google' && guarded
+      ? async (center) => {
+          const [google, osmList] = await Promise.all([
+            guarded!.searchParking(center, PARKING_RADIUS_M).catch(() => []),
+            osmParking(center, PARKING_RADIUS_M, cache, fetchImpl, env.OVERPASS_URL).catch(() => []),
+          ]);
+          return mergeParking([google, osmList]);
+        }
+      : undefined;
+
+  return { providers: { places, routing }, findParking };
 }
+
+/** Ακτίνα αναζήτησης δημοφιλών γύρω από το κέντρο της πόλης */
+const POPULAR_RADIUS_M = 4000;
 
 export function buildServer(env: Env, overrides?: { providers?: Providers; usage?: UsageStore; now?: () => Date }) {
   const app = Fastify({
     logger: { level: process.env.NODE_ENV === 'test' ? 'silent' : 'info' },
     trustProxy: env.TRUST_PROXY,
     bodyLimit: 256 * 1024,
+    // Τα ids του Photon κουβαλούν την ετικέτα (base64) → για ελληνικές διευθύνσεις ξεπερνούν το 100 (προεπιλογή)
+    routerOptions: { maxParamLength: 1024 },
   });
 
   // Εσωτερικά σφάλματα (π.χ. από Google) δεν φτάνουν στον χρήστη — μόνο στα logs
@@ -124,7 +173,7 @@ export function buildServer(env: Env, overrides?: { providers?: Providers; usage
     if (outside.length) {
       return reply.code(422).send({
         error: 'out_of_service_area',
-        message: `Εκτός ${CITY_CONFIG[parsed.data.city].label}: ${outside.map((p) => p.name).join(', ')}`,
+        message: `Εκτός ${CITY_CONFIG[parsed.data.city].region.label}: ${outside.map((p) => p.name).join(', ')}`,
       });
     }
     if (!(await dailyLimit(req, reply))) return reply;
@@ -168,6 +217,24 @@ export function buildServer(env: Env, overrides?: { providers?: Providers; usage
       req.log.warn({ err: e }, 'autocomplete failed');
       return reply.code(502).send({ error: 'geocoder_unavailable' });
     }
+  });
+
+  /**
+   * «Διαλέγω εγώ το μέρος»: δημοφιλή μαγαζιά της κατηγορίας στην πόλη (γύρω από το κέντρο).
+   * Ίδια λίστα για όλους → cache 6 ωρών (μία κλήση Google ανά πόλη/κατηγορία, όχι ανά χρήστη).
+   */
+  app.get('/v1/places/popular', async (req, reply) => {
+    const parsed = PopularVenuesRequestSchema.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', issues: parsed.error.issues });
+    const { city, activity, category } = parsed.data;
+    const key = `popular:${city}:${activity}:${category ?? '*'}`;
+    const hit = await cache.get<PopularVenuesResponse>(key);
+    if (hit) return hit;
+    if (!(await dailyLimit(req, reply, 'areas'))) return reply;
+    return cached(cache, key, 6 * 3600, async (): Promise<PopularVenuesResponse> => {
+      const list = await providers.places.searchVenues(CITY_CONFIG[city].center, activity, POPULAR_RADIUS_M, 20, category);
+      return { venues: rankPopular(list) };
+    });
   });
 
   /** Pin στον χάρτη / «η τοποθεσία μου» → διεύθυνση */

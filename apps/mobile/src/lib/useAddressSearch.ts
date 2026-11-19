@@ -57,9 +57,15 @@ export function useAddressSearch(city: CityId) {
         setQuery('');
         setResults([]);
       },
-      /** Επιλογή αποτελέσματος → συντεταγμένες. Κλείνει το session. */
-      pick: async (s: PlaceSuggestion): Promise<ResolvedPlace> => {
-        const place = await api.resolvePlace(s.placeId, session);
+      /** Επιλογή αποτελέσματος → συντεταγμένες. Κλείνει το session. null = απέτυχε (δείχνει σφάλμα στη λίστα). */
+      pick: async (s: PlaceSuggestion): Promise<ResolvedPlace | null> => {
+        let place: ResolvedPlace;
+        try {
+          place = await api.resolvePlace(s.placeId, session);
+        } catch {
+          setError(true);
+          return null;
+        }
         setSession(newToken());
         setQuery('');
         setResults([]);

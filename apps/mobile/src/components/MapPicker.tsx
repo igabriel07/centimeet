@@ -23,6 +23,7 @@ export function MapPicker({
   city,
   initial,
   title,
+  label,
   onClose,
   onConfirm,
 }: {
@@ -30,6 +31,8 @@ export function MapPicker({
   city: CityId;
   initial?: ResolvedPlace;
   title?: string;
+  /** Κείμενο πάνω από τη διεύθυνση (προεπιλογή: «Αφετηρία») */
+  label?: string;
   onClose: () => void;
   onConfirm: (place: ResolvedPlace) => void;
 }) {
@@ -83,6 +86,7 @@ export function MapPicker({
   async function pickResult(s: Parameters<typeof search.pick>[0]) {
     Keyboard.dismiss();
     const p = await search.pick(s);
+    if (!p) return;
     setPlace(p);
     skipNextReverse.current = true;
     moveTo(p.location);
@@ -162,7 +166,7 @@ export function MapPicker({
           >
             {locating ? <ActivityIndicator size="small" /> : <Text style={{ fontSize: 20 }}>◎</Text>}
           </Pressable>
-          <Text style={{ color: c.muted, fontSize: 13, fontWeight: '600' }}>{t('place.startingPoint')}</Text>
+          <Text style={{ color: c.muted, fontSize: 13, fontWeight: '600' }}>{label ?? t('place.startingPoint')}</Text>
           <View style={{ minHeight: 44, justifyContent: 'center', marginVertical: 6 }}>
             {resolving || dragging ? (
               <ActivityIndicator style={{ alignSelf: 'flex-start' }} />

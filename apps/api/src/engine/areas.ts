@@ -2,7 +2,9 @@ import {
   CITY_CONFIG,
   estimateMinutes,
   haversineKm,
+  inServiceArea,
   pointFairnessCost,
+  preferenceWeight,
   weightedCentroid,
   type CityId,
   type LatLng,
@@ -82,7 +84,7 @@ export function prefilterCandidates(
   k: number = CANDIDATES.maxRealPoints,
 ): CandidatePoint[] {
   const ranked = candidates
-    .map((c) => ({ c, cost: pointFairnessCost(estimatedTravel(city, participants, c.center)) }))
+    .map((c) => ({ c, cost: pointFairnessCost(estimatedTravel(city, participants, c.center), undefined, participants.map((p) => preferenceWeight(p.preference))) }))
     .sort((a, b) => a.cost - b.cost);
   const picked: CandidatePoint[] = [];
   for (const { c } of ranked) {
@@ -94,6 +96,5 @@ export function prefilterCandidates(
 
 /** Ελέγχει ότι όλες οι αφετηρίες είναι μέσα στην περιοχή εξυπηρέτησης */
 export function outOfServiceArea(city: CityId, participants: Participant[]): Participant[] {
-  const cfg = CITY_CONFIG[city];
-  return participants.filter((p) => haversineKm(p.origin, cfg.center) > cfg.serviceRadiusKm);
+  return participants.filter((p) => !inServiceArea(city, p.origin));
 }

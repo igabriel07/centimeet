@@ -1,7 +1,10 @@
-import { MAX_PARTICIPANTS } from '@centimeet/shared';
+import { applyInvites, isValidCategory, MAX_PARTICIPANTS } from '@centimeet/shared';
 import type {
   AreaVenuesResponse,
+  FriendGroup,
+  InviteProfile,
   Activity,
+  ActivityCategory,
   CityId,
   LatLng,
   OriginInput,
@@ -23,11 +26,17 @@ export type DraftPerson = {
   userId?: string;
   /** Αυτό το άτομο είναι ο συνδεδεμένος χρήστης (διοργανωτής) */
   isMe?: boolean;
+  /** Φίλος: επιλέχθηκε μεμονωμένα από τη λίστα φίλων */
+  direct?: boolean;
+  /** Φίλος: ομάδες (ids) μέσω των οποίων προσκλήθηκε */
+  groups?: string[];
 };
 
 type OutingDraft = {
   city: CityId;
   activity: Activity;
+  /** Κατηγορία (π.χ. πίτσα) — χωρίς = «Όλα» */
+  category?: ActivityCategory;
   departAt?: string;
   people: DraftPerson[];
   suggestions?: SuggestionsResponse;
@@ -35,13 +44,19 @@ type OutingDraft = {
   /** Αν τα δεδομένα προέρχονται από αποθηκευμένη έξοδο */
   savedOutingId?: string;
   setCity: (c: CityId) => void;
-  setActivity: (a: Activity) => void;
+  /** Αλλάζει δραστηριότητα· η κατηγορία μένει μόνο αν ανήκει στη νέα δραστηριότητα */
+  setActivity: (a: Activity, category?: ActivityCategory) => void;
+  setCategory: (c?: ActivityCategory) => void;
   setDepartAt: (iso?: string) => void;
   addPerson: (p?: Partial<DraftPerson>) => void;
-  addFriends: (friends: { id: string; display_name: string }[]) => void;
+  /** Ομάδες φίλων που έχουν προσκληθεί */
+  invitedGroups: FriendGroup[];
+  /** Ορίζει όλη την επιλογή προσκλήσεων (μεμονωμένοι φίλοι + ομάδες) — από τα pop-ups Φίλοι/Ομάδα */
+  setInvites: (direct: InviteProfile[], groups: FriendGroup[], me?: string) => void;
   updatePerson: (id: string, patch: Partial<DraftPerson>) => void;
   removePerson: (id: string) => void;
-  setMe: (id: string) => void;
+  /** «Εγώ» (ο τρέχων χρήστης) πάντα πρώτο· ενημερώνει το όνομα από το προφίλ */
+  ensureMe: (name: string) => void;
   setSuggestions: (s?: SuggestionsResponse) => void;
   /** «Δες μαγαζιά εδώ»: προσθέτει τα μαγαζιά μιας εναλλακτικής περιοχής */
   addAreaVenues: (r: AreaVenuesResponse) => void;
@@ -50,6 +65,7 @@ type OutingDraft = {
     outingId: string;
     city: CityId;
     activity: Activity;
+    category?: ActivityCategory;
     departAt?: string;
     people: DraftPerson[];
     suggestions: SuggestionsResponse;
@@ -66,11 +82,11 @@ const isBlank = (p: DraftPerson) => !p.name.trim() && !p.origin && !p.mode && !p
 const initial = () => ({
   city: 'athens' as CityId,
   activity: 'coffee' as Activity,
+  category: undefined as ActivityCategory | undefined,
   departAt: undefined,
-  people: [
-    { id: newId(), name: '' },
-    { id: newId(), name: '' },
-  ],
+  // Μόνο «Εγώ»· οι υπόλοιποι προστίθενται με «Πρόσθεσε άτομο» / πρόσκληση φίλων
+  people: [{ id: newId(), name: '', isMe: true }] as DraftPerson[],
+  invitedGroups: [] as FriendGroup[],
   suggestions: undefined,
   plan: undefined,
   savedOutingId: undefined,
@@ -79,25 +95,39 @@ const initial = () => ({
 export const useOuting = create<OutingDraft>((set) => ({
   ...initial(),
   setCity: (city) => set({ city }),
-  setActivity: (activity) => set({ activity }),
+  setActivity: (activity, category) => set({ activity, category: isValidCategory(activity, category) ? category : undefined }),
+  setCategory: (category) => set((s) => ({ category: isValidCategory(s.activity, category) ? category : undefined })),
   setDepartAt: (departAt) => set({ departAt }),
   addPerson: (p) => set((s) => ({ people: [...s.people, { id: newId(), name: '', ...p }] })),
-  addFriends: (friends) =>
+  setInvites: (direct, groups, me) =>
     set((s) => {
-      const known = new Set(s.people.map((p) => p.userId).filter(Boolean));
-      const fresh = friends.filter((f) => !known.has(f.id)).map((f) => ({ id: newId(), name: f.display_name, userId: f.id }));
-      // Οι φίλοι παίρνουν πρώτα τη θέση κενών καρτών, μετά προστίθενται στο τέλος
-      const people = [...s.people];
-      for (const f of fresh) {
-        const blank = people.findIndex(isBlank);
-        if (blank >= 0) people[blank] = f;
-        else people.push(f);
-      }
-      return { people: people.slice(0, MAX_PARTICIPANTS) };
+      const friends = s.people.filter((p) => p.userId && !p.isMe);
+      const current = friends.map((p) => ({ userId: p.userId!, name: p.name, direct: !!p.direct, groups: p.groups ?? [] }));
+      const next = applyInvites(current, direct, groups, me);
+      const byUser = new Map(friends.map((p) => [p.userId!, p]));
+      const invitees: DraftPerson[] = next.map((i) => ({
+        ...(byUser.get(i.userId) ?? { id: newId() }),
+        name: i.name,
+        userId: i.userId,
+        direct: i.direct,
+        groups: i.groups,
+      }));
+      const others = s.people.filter((p) => !p.userId || p.isMe);
+      return { people: [...others, ...invitees].slice(0, MAX_PARTICIPANTS), invitedGroups: groups };
     }),
   updatePerson: (id, patch) => set((s) => ({ people: s.people.map((p) => (p.id === id ? { ...p, ...patch } : p)) })),
-  removePerson: (id) => set((s) => ({ people: s.people.length > 2 ? s.people.filter((p) => p.id !== id) : s.people })),
-  setMe: (id) => set((s) => ({ people: s.people.map((p) => ({ ...p, isMe: p.id === id ? !p.isMe : false })) })),
+  // Το «Εγώ» δεν αφαιρείται
+  removePerson: (id) => set((s) => ({ people: s.people.filter((p) => p.id !== id || p.isMe) })),
+  ensureMe: (name) =>
+    set((s) => {
+      const me = s.people.find((p) => p.isMe);
+      const others = s.people.filter((p) => !p.isMe);
+      if (me) return me.name === name && s.people[0] === me ? {} : { people: [{ ...me, name }, ...others] };
+      // Δεν υπάρχει «Εγώ»: παίρνει τη θέση μιας κενής κάρτας, αλλιώς μπαίνει πρώτο
+      const blank = others.findIndex(isBlank);
+      const rest = blank >= 0 ? others.filter((_, i) => i !== blank) : others;
+      return { people: [{ id: newId(), name, isMe: true }, ...rest].slice(0, MAX_PARTICIPANTS) };
+    }),
   setSuggestions: (suggestions) => set({ suggestions, plan: undefined }),
   addAreaVenues: (r) =>
     set((s) =>
@@ -113,7 +143,7 @@ export const useOuting = create<OutingDraft>((set) => ({
         : {},
     ),
   setPlan: (plan) => set({ plan }),
-  loadSaved: ({ outingId, ...rest }) => set({ ...rest, savedOutingId: outingId, plan: undefined }),
+  loadSaved: ({ outingId, ...rest }) => set({ category: undefined, invitedGroups: [], ...rest, savedOutingId: outingId, plan: undefined }),
   reset: () => set(initial()),
 }));
 
@@ -123,7 +153,7 @@ export function toParticipants(people: DraftPerson[]) {
   if (!ready) return null;
   return people.map((p, i) => ({
     id: p.id,
-    name: p.name.trim() || `Άτομο ${i + 1}`,
+    name: p.name.trim() || (p.isMe ? 'Εγώ' : `Άτομο ${i + 1}`),
     origin: p.origin!,
     mode: p.mode!,
   }));
@@ -140,6 +170,15 @@ const toOrigin = (p: DraftPerson): OriginInput => ({
  * Προετοιμάζει το πρόχειρο για αποθήκευση (create_outing):
  * «Εγώ» → αφετηρία διοργανωτή, φίλοι → προσκλήσεις, υπόλοιποι → επισκέπτες.
  */
+/** «Διαλέγω εγώ το μέρος»: χωρίς αφετηρίες — μόνο ποιοι καλούνται + ονόματα επισκεπτών */
+export function toFixedSaveInput(people: DraftPerson[]) {
+  const guests = people.filter((p) => !p.isMe && !p.userId && !isBlank(p));
+  return {
+    invitees: people.flatMap((p) => (p.userId && !p.isMe ? [p.userId] : [])),
+    guests: guests.map((p) => ({ name: p.name.trim() || `Άτομο ${people.indexOf(p) + 1}` })),
+  };
+}
+
 export function toSaveInput(people: DraftPerson[]):
   | { ok: true; me: OriginInput; invitees: string[]; guests: (OriginInput & { name: string })[] }
   | { ok: false; error: 'needMe' | 'incomplete' } {

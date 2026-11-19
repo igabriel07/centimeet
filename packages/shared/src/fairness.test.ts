@@ -6,10 +6,12 @@ import {
   estimateTripCost,
   haversineKm,
   pointFairnessCost,
+  preferenceWeight,
+  spotRankKey,
   rankVenuesByQuality,
   weightedCentroid,
 } from './index';
-import type { CrowdHint, TravelEstimate, Venue } from './index';
+import type { CrowdHint, PlacePreference, TravelEstimate, Venue } from './index';
 
 const v = (id: string, rating?: number, ratingCount = 500): Venue => ({
   id,
@@ -130,5 +132,31 @@ describe('share', () => {
     expect(msg).toContain('Μαρία');
     expect(msg).toContain('M3');
     expect(channelUrl('viber', msg)).toMatch(/^viber:\/\/forward\?text=/);
+  });
+});
+
+describe('«Πού θέλεις να πάμε;» (προτίμηση ανά άτομο)', () => {
+  const tr = (a: number, b: number): TravelEstimate[] => [
+    { participantId: 'a', durationMin: a, distanceKm: a / 3, costEur: 0 },
+    { participantId: 'b', durationMin: b, distanceKm: b / 3, costEur: 0 },
+  ];
+  const w = (pa: PlacePreference, pb: PlacePreference) => [preferenceWeight(pa), preferenceWeight(pb)];
+  const middle = tr(20, 20);
+  const nearA = tr(8, 32);
+
+  it('όλοι «στη μέση»: κερδίζει το ισόρροπο σημείο (όπως πριν)', () => {
+    expect(pointFairnessCost(middle, undefined, w('fair', 'fair'))).toBeLessThan(pointFairnessCost(nearA, undefined, w('fair', 'fair')));
+    expect(pointFairnessCost(middle, undefined, w('fair', 'fair'))).toBe(pointFairnessCost(middle));
+  });
+  it('ο Α «κοντά μου» και ο Β «οπουδήποτε»: κερδίζει το σημείο κοντά στον Α', () => {
+    expect(pointFairnessCost(nearA, undefined, w('near', 'anywhere'))).toBeLessThan(pointFairnessCost(middle, undefined, w('near', 'anywhere')));
+  });
+  it('μόνο ο Β «οπουδήποτε»: ο Α παίρνει το πλεονέκτημα', () => {
+    expect(pointFairnessCost(nearA, undefined, w('fair', 'anywhere'))).toBeLessThan(pointFairnessCost(middle, undefined, w('fair', 'anywhere')));
+  });
+  it('«Σημείο»: η προτίμηση μετρά και στην απόσταση', () => {
+    const [mid] = spotRankKey(middle, undefined, w('near', 'anywhere'));
+    const [near] = spotRankKey(nearA, undefined, w('near', 'anywhere'));
+    expect(near).toBeLessThan(mid);
   });
 });

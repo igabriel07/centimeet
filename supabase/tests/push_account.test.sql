@@ -44,7 +44,16 @@ select public.create_outing('drinks', 'athens', null, null, '{"lat":37.97,"lng":
 reset role;
 
 select test.ok((select count(*) from test.pushes_to(:'TG')) = 1, 'ο Γ πήρε μία ειδοποίηση πρόσκλησης (όχι και για το μήνυμα «Νέα έξοδος»)');
-select test.ok((select m->>'body' from test.pushes_to(:'TG') m limit 1) = 'Φωτεινή σε κάλεσε για ποτό. Δήλωσε από πού ξεκινάς!', 'κείμενο πρόσκλησης');
+select test.ok((select m->>'body' from test.pushes_to(:'TG') m limit 1) = 'Φωτεινή σε προσκαλεί για ποτό. Θα έρθεις;', 'κείμενο πρόσκλησης (χωρίς ώρα)');
+select test.ok((select m->>'title' from test.pushes_to(:'TG') m limit 1) = 'Πρόσκληση 📍', 'τίτλος πρόσκλησης');
+
+-- Ώρα στο κείμενο: σήμερα → μόνο ώρα· άλλη μέρα → μέρα + ώρα (ώρα Ελλάδας)
+select test.ok(public._when_label(null) = '', 'χωρίς ώρα');
+select test.ok(
+  public._when_label(((now() at time zone 'Europe/Athens')::date + time '23:59') at time zone 'Europe/Athens') = ' στις 23:59',
+  'σήμερα: «στις 23:59»');
+select test.ok(public._when_label('2030-12-22 18:30:00+00') = ' την Κυρ 22/12 στις 20:30', 'άλλη μέρα: «την Κυρ 22/12 στις 20:30»');
+select test.ok(public._when_label('2030-07-05 06:05:00+00') = ' την Παρ 5/7 στις 09:05', 'καλοκαίρι (UTC+3), χωρίς μηδενικά στη μέρα/μήνα');
 select test.ok((select m->'data'->>'url' from test.pushes_to(:'TG') m limit 1) = '/outing/' || :'outing', 'η ειδοποίηση ανοίγει την έξοδο');
 select test.ok((select count(*) from test.pushes_to(:'TF')) = 0, 'ο διοργανωτής δεν ειδοποιείται για τη δική του έξοδο');
 

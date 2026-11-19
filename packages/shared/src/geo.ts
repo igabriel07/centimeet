@@ -1,4 +1,4 @@
-import type { LatLng, TransportMode } from './types';
+import { preferenceWeight, type LatLng, type PlacePreference, type TransportMode } from './types';
 
 const R_KM = 6371;
 const toRad = (d: number) => (d * Math.PI) / 180;
@@ -29,13 +29,14 @@ export const URBAN_SPEED_KMH: Record<TransportMode, number> = {
  * Σταθμισμένο κέντρο: όσο πιο αργό το μέσο, τόσο περισσότερο «τραβάει» το κέντρο προς
  * τη μεριά του ατόμου, ώστε να εξισώνονται οι ΧΡΟΝΟΙ και όχι οι αποστάσεις.
  */
-export function weightedCentroid(points: { origin: LatLng; mode: TransportMode }[]): LatLng {
+export function weightedCentroid(points: { origin: LatLng; mode: TransportMode; preference?: PlacePreference }[]): LatLng {
   if (points.length === 0) throw new Error('weightedCentroid: empty input');
   let wSum = 0;
   let lat = 0;
   let lng = 0;
   for (const p of points) {
-    const w = 1 / URBAN_SPEED_KMH[p.mode];
+    // Πιο αργό μέσο → πιο κοντά του· «κοντά μου» → ακόμη πιο κοντά, «οπουδήποτε» → λιγότερο
+    const w = (1 / URBAN_SPEED_KMH[p.mode]) * preferenceWeight(p.preference);
     wSum += w;
     lat += p.origin.lat * w;
     lng += p.origin.lng * w;

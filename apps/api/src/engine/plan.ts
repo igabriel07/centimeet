@@ -59,6 +59,7 @@ export async function venuePlan(
       name: p.name,
       mode: p.mode,
       durationMin: trip ? Math.round(trip.durationMin) : 0,
+      ...(r?.estimated ? { estimated: true } : {}),
       distanceKm: trip ? Math.round(trip.distanceKm * 10) / 10 : 0,
       costEur: trip?.costEur ?? 0,
       costNote: trip ? (toll ? `${trip.costNote} + διόδια` : trip.costNote) : 'Δεν βρέθηκε διαδρομή',
@@ -66,7 +67,7 @@ export async function venuePlan(
       parkingSearchMin: trip?.parkingMin || undefined,
       transitSteps: r?.steps,
       parking: vehicle ? parking : undefined,
-      navigationUrl: googleMapsNavUrl(venue.location, p.mode, venue.id.startsWith('mock_') ? undefined : venue.id),
+      navigationUrl: googleMapsNavUrl(venue.location, p.mode, venue.id.startsWith('mock_') || venue.id.startsWith('osm:') ? undefined : venue.id),
     };
   });
 

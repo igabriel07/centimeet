@@ -3,8 +3,9 @@
  * Τα κλειδιά μένουν ΜΟΝΟ στο backend.
  */
 import {
+  haversineKm,
   walkMinutes,
-  type Activity,
+  type ActivityCategory,
   type LatLng,
   type OpeningPeriod,
   type ParkingOption,
@@ -13,8 +14,10 @@ import {
   type TransitStep,
   type TransportMode,
   type Venue,
+  type VenueActivity,
 } from '@centimeet/shared';
 import { cached, geoKey, type Cache } from '../lib/cache';
+import { googleSearchFor } from './categories';
 import type { MatrixCell, PlacesProvider, RouteTiming, RoutingProvider } from './types';
 
 export { walkMinutes };
@@ -22,14 +25,8 @@ export { walkMinutes };
 const PLACES = 'https://places.googleapis.com/v1';
 const ROUTES = 'https://routes.googleapis.com';
 
-export const ACTIVITY_TYPES: Record<Activity, string[]> = {
-  coffee: ['cafe', 'coffee_shop'],
-  food: ['restaurant'],
-  drinks: ['bar', 'pub', 'wine_bar'],
-  cinema: ['movie_theater'],
-  dessert: ['dessert_shop', 'bakery', 'ice_cream_shop'],
-  brunch: ['brunch_restaurant', 'breakfast_restaurant', 'cafe'],
-};
+/** Αντιστοίχιση δραστηριότητας/κατηγορίας → τύποι ή κείμενο αναζήτησης: βλ. ./categories.ts */
+export { ACTIVITY_GOOGLE } from './categories';
 
 /**
  * Η μηχανή δρομολογείται ως αυτοκίνητο (ο κινητήρας εφαρμόζει μικρότερο χρόνο):
@@ -131,22 +128,35 @@ export class GoogleProvider implements PlacesProvider, RoutingProvider {
 
   // ---------- Places ----------
 
-  async searchVenues(center: LatLng, activity: Activity, radiusM: number, max: number): Promise<Venue[]> {
-    const key = `venues:${activity}:${geoKey(center.lat, center.lng)}:${radiusM}:${max}`;
+  async searchVenues(center: LatLng, activity: VenueActivity, radiusM: number, max: number, category?: ActivityCategory): Promise<Venue[]> {
+    const key = `venues:${activity}:${category ?? '*'}:${geoKey(center.lat, center.lng)}:${radiusM}:${max}`;
     return cached(this.cache, key, 60 * 60, async () => {
-      const data = await this.call<{ places?: GPlace[] }>(
-        `${PLACES}/places:searchNearby`,
-        VENUE_FIELDS.split(',').map((f) => `places.${f}`).join(','),
-        {
-          includedTypes: ACTIVITY_TYPES[activity],
+      const search = googleSearchFor(activity, category);
+      const fields = VENUE_FIELDS.split(',').map((f) => `places.${f}`).join(',');
+      const circle = { center: { latitude: center.lat, longitude: center.lng }, radius: radiusM };
+      let places: GPlace[];
+      if ('types' in search) {
+        const data = await this.call<{ places?: GPlace[] }>(`${PLACES}/places:searchNearby`, fields, {
+          includedTypes: search.types,
           maxResultCount: Math.min(20, max),
           rankPreference: 'POPULARITY',
           languageCode: 'el',
           regionCode: 'GR',
-          locationRestriction: { circle: { center: { latitude: center.lat, longitude: center.lng }, radius: radiusM } },
-        },
-      );
-      const venues = (data.places ?? []).map(toVenue);
+          locationRestriction: { circle },
+        });
+        places = data.places ?? [];
+      } else {
+        // Text Search δέχεται κύκλο μόνο ως «προτίμηση» → κρατάμε όσα είναι μέσα στην ακτίνα
+        const data = await this.call<{ places?: GPlace[] }>(`${PLACES}/places:searchText`, fields, {
+          textQuery: search.text,
+          pageSize: Math.min(20, max),
+          languageCode: 'el',
+          regionCode: 'GR',
+          locationBias: { circle },
+        });
+        places = data.places ?? [];
+      }
+      const venues = places.map(toVenue).filter((v) => 'types' in search || haversineKm(center, v.location) * 1000 <= radiusM);
       // Το πλάνο (getVenue) βρίσκει το μαγαζί εδώ χωρίς νέα χρέωση Place Details
       await Promise.all(venues.map((v) => this.cache.set(`venue:${v.id}`, v, 60 * 60)));
       return venues;

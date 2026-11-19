@@ -71,6 +71,8 @@ export class SupabaseUsageStore implements UsageStore {
 export const GOOGLE_FREE_MONTHLY = {
   /** Nearby Search Enterprise + Atmosphere (μαγαζιά) */
   places_search: 1000,
+  /** Text Search Enterprise + Atmosphere (κατηγορίες χωρίς δικό τους τύπο, π.χ. σουβλάκι) */
+  text_search: 1000,
   /** Place Details Enterprise (στοιχεία μαγαζιού για το πλάνο, όταν δεν είναι στην cache) */
   place_details: 1000,
   /** Nearby Search Pro (parking) */

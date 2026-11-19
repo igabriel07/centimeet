@@ -1,10 +1,12 @@
-import type { ScoredVenue, SuggestionArea } from '@centimeet/shared';
+import { isVenueActivity, type ScoredVenue, type SuggestionArea } from '@centimeet/shared';
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState, type ComponentRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert, Pressable, ScrollView, View } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
+import { anyEstimated, OsmAttribution, tilde } from '@/components/OsmAttribution';
+import { PeopleLegend, PersonMarkers, type MapPerson } from '@/components/PeopleOnMap';
 import { Body, Button, Card, Label, Row, Screen, useResponsive, useTheme } from '@/components/ui';
 import { api, ApiError } from '@/lib/api';
 import { toParticipants, useOuting } from '@/store/outing';
@@ -14,15 +16,26 @@ export default function Results() {
   const { t } = useTranslation();
   const { isTablet } = useResponsive();
   const c = useTheme();
-  const { suggestions, people } = useOuting();
+  const { suggestions, people, activity } = useOuting();
+  const mapRef = useRef<ComponentRef<typeof MapView>>(null);
 
   if (!suggestions) return <Screen />;
-  const primaryArea = suggestions.areas.find((a) => a.isPrimary)!;
+  const primaryArea = suggestions.areas.find((a) => a.isPrimary);
+  if (!primaryArea) {
+    return (
+      <Screen>
+        <Body muted style={{ padding: 16 }}>{t('results.empty')}</Body>
+      </Screen>
+    );
+  }
+  const isSpot = !isVenueActivity(activity);
   const altAreas = suggestions.areas.filter((a) => !a.isPrimary);
   const all = [...suggestions.primary, ...suggestions.alternatives];
   const notices = suggestions.notices ?? {};
 
-  const list = (
+  const list = isSpot ? (
+    <SpotList areas={suggestions.areas} estimated={!!notices.estimatedTimes} />
+  ) : (
     <ScrollView contentContainerStyle={{ padding: 16 }}>
       {notices.estimatedTimes || notices.basicVenues ? (
         <Card>
@@ -34,7 +47,7 @@ export default function Results() {
       {suggestions.primary.length ? <Label>{`${t('results.primary')} · ${primaryArea.label}`}</Label> : null}
       {suggestions.primary.length ? (
         <Body muted style={{ marginBottom: 10 }}>
-          {t('results.areaSummary', { min: primaryArea.minMin, max: primaryArea.maxMin, radius: primaryArea.radiusM })}
+          {t('results.areaSummary', { min: `${tilde(anyEstimated(primaryArea.travel))}${primaryArea.minMin}`, max: primaryArea.maxMin, radius: primaryArea.radiusM })}
         </Body>
       ) : null}
       {suggestions.primary.map((s) => (
@@ -44,7 +57,7 @@ export default function Results() {
       {altAreas.map((a) => (
         <View key={a.id} style={{ marginBottom: 8 }}>
           <Body style={{ fontWeight: '700', marginBottom: 6 }}>
-            📍 {a.label} · <Body muted>{t('results.range', { min: a.minMin, max: a.maxMin })}</Body>
+            📍 {a.label} · <Body muted>{t('results.range', { min: `${tilde(anyEstimated(a.travel))}${a.minMin}`, max: a.maxMin })}</Body>
           </Body>
           {a.hasVenues ? (
             suggestions.alternatives
@@ -55,11 +68,25 @@ export default function Results() {
           )}
         </View>
       ))}
+      {notices.osmData ? <OsmAttribution /> : null}
     </ScrollView>
   );
 
+  // Ο χάρτης χωράει όλους: αφετηρίες της παρέας + μαγαζιά / σημεία
+  const fitAll = () => {
+    const coords = [
+      ...people.flatMap((p) => (p.origin ? [{ latitude: p.origin.lat, longitude: p.origin.lng }] : [])),
+      ...(isSpot ? suggestions.areas.map((a) => a.center) : all.map((s) => s.venue.location)).map((l) => ({ latitude: l.lat, longitude: l.lng })),
+    ];
+    if (coords.length > 1) mapRef.current?.fitToCoordinates(coords, { edgePadding: { top: 50, right: 40, bottom: 40, left: 40 }, animated: false });
+  };
+  const focusPerson = (p: MapPerson) =>
+    p.origin && mapRef.current?.animateToRegion({ latitude: p.origin.lat, longitude: p.origin.lng, latitudeDelta: 0.03, longitudeDelta: 0.03 }, 400);
+
   const map = (
     <MapView
+      ref={mapRef}
+      onMapReady={fitAll}
       style={{ flex: 1 }}
       initialRegion={{
         latitude: primaryArea.center.lat,
@@ -68,17 +95,24 @@ export default function Results() {
         longitudeDelta: 0.12,
       }}
     >
-      {people.map((p) =>
-        p.origin ? (
-          <Marker key={p.id} coordinate={{ latitude: p.origin.lat, longitude: p.origin.lng }} title={p.name} pinColor={c.person} />
-        ) : null,
-      )}
+      <PersonMarkers people={people} />
+      {isSpot
+        ? suggestions.areas.map((a) => (
+            <Marker
+              key={a.id}
+              coordinate={{ latitude: a.center.lat, longitude: a.center.lng }}
+              title={a.label}
+              description={t('results.range', { min: `${tilde(anyEstimated(a.travel))}${a.minMin}`, max: a.maxMin })}
+              pinColor={a.isPrimary ? c.venue : c.muted}
+            />
+          ))
+        : null}
       {all.map((s) => (
         <Marker
           key={s.venue.id}
           coordinate={{ latitude: s.venue.location.lat, longitude: s.venue.location.lng }}
           title={s.venue.name}
-          description={t('results.range', { min: s.minMin, max: s.maxMin })}
+          description={t('results.range', { min: `${tilde(anyEstimated(s.travel))}${s.minMin}`, max: s.maxMin })}
           onCalloutPress={() => router.push(`/outing/venue/${encodeURIComponent(s.venue.id)}`)}
         />
       ))}
@@ -90,15 +124,77 @@ export default function Results() {
       {isTablet ? (
         <View style={{ flex: 1, flexDirection: 'row' }}>
           <View style={{ width: 420 }}>{list}</View>
-          <View style={{ flex: 1 }}>{map}</View>
+          <View style={{ flex: 1 }}>
+            {map}
+            <PeopleLegend people={people} onFocus={focusPerson} />
+          </View>
         </View>
       ) : (
         <View style={{ flex: 1 }}>
-          <View style={{ height: 220 }}>{map}</View>
+          <View style={{ height: 240 }}>{map}</View>
+          <PeopleLegend people={people} onFocus={focusPerson} />
           <View style={{ flex: 1 }}>{list}</View>
         </View>
       )}
     </Screen>
+  );
+}
+
+/** «Σημείο»: μόνο σημεία συνάντησης — χρόνος, απόσταση και κόστος ανά άτομο + οδηγίες στους χάρτες */
+function SpotList({ areas, estimated }: { areas: SuggestionArea[]; estimated: boolean }) {
+  const { t } = useTranslation();
+  const [primary, ...others] = [...areas].sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary));
+  return (
+    <ScrollView contentContainerStyle={{ padding: 16 }}>
+      {estimated ? (
+        <Card>
+          <Body muted>ℹ️ {t('results.estimatedTimes')}</Body>
+        </Card>
+      ) : null}
+      {primary ? (
+        <>
+          <Label>{t('results.spotPrimary')}</Label>
+          <SpotCard area={primary} />
+        </>
+      ) : null}
+      {others.length ? <Label>{t('results.spotAlternatives')}</Label> : null}
+      {others.map((a) => (
+        <SpotCard key={a.id} area={a} />
+      ))}
+    </ScrollView>
+  );
+}
+
+function SpotCard({ area }: { area: SuggestionArea }) {
+  const { t } = useTranslation();
+  const c = useTheme();
+  const { people } = useOuting();
+  const avgKm = area.travel.reduce((s, x) => s + x.distanceKm, 0) / Math.max(1, area.travel.length);
+  const name = (id: string) => people.find((p) => p.id === id)?.name.trim() || '—';
+  const openMaps = () => {
+    const { lat, lng } = area.center;
+    Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`).catch(() => {});
+  };
+  return (
+    <Card>
+      <Body style={{ fontWeight: '700', fontSize: 17 }}>📍 {area.label}</Body>
+      <Body muted style={{ marginTop: 4 }}>
+        {t('results.spotSummary', { min: `${tilde(anyEstimated(area.travel))}${area.minMin}`, max: area.maxMin, km: avgKm.toFixed(1) })}
+      </Body>
+      <View style={{ marginTop: 10, gap: 4 }}>
+        {area.travel.map((x) => (
+          <Row key={x.participantId} style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
+            <Body style={{ flexShrink: 1 }}>{name(x.participantId)}</Body>
+            <Body muted>
+              {t('results.personTrip', { min: `${tilde(x.estimated)}${x.durationMin}`, km: x.distanceKm, cost: x.costEur > 0 ? ` · ${x.costEur.toFixed(2)}€` : '' })}
+            </Body>
+          </Row>
+        ))}
+      </View>
+      <Pressable onPress={openMaps} accessibilityRole="link" style={{ marginTop: 10 }}>
+        <Body style={{ color: c.primary, fontWeight: '600' }}>🧭 {t('results.directions')}</Body>
+      </Pressable>
+    </Card>
   );
 }
 
@@ -116,6 +212,7 @@ function AreaLoader({ area }: { area: SuggestionArea }) {
       const res = await api.areaVenues({
         city: o.city,
         activity: o.activity,
+        category: o.category,
         departAt: o.departAt,
         participants,
         area: { id: area.id, label: area.label, center: area.center, travel: area.travel },
@@ -156,7 +253,7 @@ function VenueCard({ s, area, groupSize }: { s: ScoredVenue; area?: string; grou
           .filter(Boolean)
           .join(' · ')}
       </Body>
-      <Body style={{ marginTop: 6 }}>⏱ {t('results.range', { min: s.minMin, max: s.maxMin })}</Body>
+      <Body style={{ marginTop: 6 }}>⏱ {t('results.range', { min: `${tilde(anyEstimated(s.travel))}${s.minMin}`, max: s.maxMin })}</Body>
     </Card>
   );
 }

@@ -30,14 +30,16 @@ export const PEAK_WINDOWS: Record<Activity, Window[]> = {
     { days: WEEKEND, from: '11:00', to: '14:30' },
     { days: [0, 1, 2, 3, 4, 5, 6], from: '18:00', to: '21:00' },
   ],
-  brunch: [{ days: WEEKEND, from: '10:30', to: '14:30' }],
+  spot: [],
+  // Ενιαίο φαγητό: brunch Σαββατοκύριακου + βραδινό + κυριακάτικο μεσημεριανό
   food: [
+    { days: WEEKEND, from: '10:30', to: '14:30' },
     { days: [4, ...FRI_SAT], from: '21:00', to: '23:30' },
     { days: [0], from: '13:30', to: '16:30' },
   ],
   drinks: [{ days: [4, ...FRI_SAT], from: '22:00', to: '02:00' }],
-  dessert: [{ days: [5, 6, 0], from: '19:00', to: '23:00' }],
   cinema: [{ days: [5, 6, 0], from: '19:00', to: '23:00' }],
+  theater: [{ days: [5, 6, 0], from: '20:00', to: '23:30' }],
 };
 
 const hm = (s: string) => {
