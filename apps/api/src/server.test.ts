@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AreaVenuesResponse, SuggestionsResponse, VenuePlanResponse } from '@centimeet/shared';
 import { loadEnv } from './env';
 import { buildServer } from './server';
@@ -6,6 +6,14 @@ import { GoogleProvider, MATRIX_MAX_ELEMENTS, mergeWalkSteps } from './providers
 import { MemoryCache } from './lib/cache';
 import { mergeParking } from './providers/osm';
 import { PhotonGeocoder } from './providers/photon';
+
+// Σταθερή «τώρα» (Παρασκευή 20:00 ώρα Ελλάδας): τα tests χωρίς ώρα συνάντησης δεν πρέπει
+// να αποτυγχάνουν όταν τρέχουν νύχτα (τα μαγαζιά «κλειστά» → καμία πρόταση).
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-11-13T18:00:00Z'));
+});
+afterAll(() => vi.useRealTimers());
 
 const env = loadEnv({ USE_MOCK_PROVIDERS: 'true', REQUIRE_AUTH: 'false', GEOCODER: 'mock' } as NodeJS.ProcessEnv);
 
@@ -250,6 +258,29 @@ describe('διευθύνσεις', () => {
 
   it('reverse απορρίπτει άκυρες συντεταγμένες', async () => {
     const res = await app.inject({ method: 'GET', url: '/v1/places/reverse?lat=999&lng=0' });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('δέχεται μεγάλα ids (Photon με ελληνική ετικέτα) — όχι 414', async () => {
+    const id = encodeURIComponent(`photon:37.974425,23.735410:${'Wy'.padEnd(300, 'x')}`);
+    const res = await app.inject({ method: 'GET', url: `/v1/places/${id}` });
+    expect(res.statusCode).not.toBe(414);
+  });
+});
+
+describe('δημοφιλή μαγαζιά («Διαλέγω εγώ το μέρος»)', () => {
+  const app = buildServer(env);
+
+  it('επιστρέφει κατάταξη μαγαζιών της κατηγορίας', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/places/popular?city=athens&activity=food&category=pizza' });
+    expect(res.statusCode).toBe(200);
+    const { venues } = res.json();
+    expect(venues.length).toBeGreaterThan(0);
+    expect(venues.length).toBeLessThanOrEqual(10);
+  });
+
+  it('απορρίπτει κατηγορία άλλης δραστηριότητας', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/places/popular?city=athens&activity=coffee&category=pizza' });
     expect(res.statusCode).toBe(400);
   });
 });

@@ -1,10 +1,18 @@
 import { haversineKm, pointFairnessCost, type LatLng, type SuggestRequest, type TransportMode, type Venue } from '@centimeet/shared';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { MockProvider } from '../providers/mock';
 import type { MatrixCell, PlacesProvider, Providers, RouteTiming, RoutingProvider } from '../providers/types';
 import { venuePlan } from './plan';
 import { ENGINE_PROFILES } from './config';
 import { SEARCH, suggest } from './suggest';
+
+// Σταθερή «τώρα» (Παρασκευή 20:00 ώρα Ελλάδας): τα tests χωρίς ώρα συνάντησης δεν πρέπει
+// να αποτυγχάνουν όταν τρέχουν νύχτα (τα μαγαζιά «κλειστά» → καμία πρόταση).
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-11-13T18:00:00Z'));
+});
+afterAll(() => vi.useRealTimers());
 
 const ATHENS = {
   kifisia: { lat: 38.0736, lng: 23.8114 },

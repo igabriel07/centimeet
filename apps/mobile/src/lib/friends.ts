@@ -1,3 +1,4 @@
+import { FriendGroupsSchema } from '@centimeet/shared';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from './supabase';
 
@@ -33,4 +34,17 @@ export function acceptedFriends(rows: FriendshipRow[] | undefined, me: string | 
   return (rows ?? [])
     .filter((r) => r.status === 'accepted')
     .map((r) => (r.requester_id === me ? r.addressee : r.requester));
+}
+
+/** Οι ομάδες φίλων μου (με τα μέλη που είναι ακόμη φίλοι) */
+export function useMyGroups(me: string | undefined) {
+  return useQuery({
+    queryKey: ['friend-groups', me],
+    enabled: !!me,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('my_groups');
+      if (error) throw error;
+      return FriendGroupsSchema.parse(data);
+    },
+  });
 }

@@ -29,7 +29,6 @@ eas update:configure      # αυτόματες ενημερώσεις JS χωρ�
 | `EXPO_PUBLIC_SUPABASE_ANON_KEY` | publishable / anon key |
 | `EXPO_PUBLIC_API_URL` | URL του Cloud Run |
 | `EXPO_PUBLIC_CONTACT_EMAIL`, `EXPO_PUBLIC_LEGAL_OPERATOR` | στοιχεία σας (εμφανίζονται στην πολιτική απορρήτου) |
-| `EXPO_PUBLIC_REVIEW_EMAIL` | το email του λογαριασμού ελέγχου (βλ. §4) |
 | `EXPO_PUBLIC_SENTRY_DSN` | προαιρετικό |
 | `GOOGLE_MAPS_ANDROID_API_KEY` (secret) | κλειδί «Maps SDK for Android» (§2) |
 
@@ -52,11 +51,10 @@ eas update:configure      # αυτόματες ενημερώσεις JS χωρ�
 
 ## 4. Λογαριασμός για τον έλεγχο της Apple / Google
 
-Οι ελεγκτές δεν μπορούν να πάρουν τον κωδικό από το email σου. Γι' αυτό:
+Η εφαρμογή έχει κανονική σύνδεση με email + κωδικό πρόσβασης, οπότε:
 1. Supabase → Authentication → Users → **Add user** → email π.χ. `review@το-domain-σου.gr` + password, *Auto confirm*.
-2. Βάλε αυτό το email στο `EXPO_PUBLIC_REVIEW_EMAIL`. Μόνο γι' αυτό το email η εφαρμογή δείχνει πεδίο κωδικού.
-3. Στα στοιχεία ελέγχου (App Store Connect → App Review Information / Play Console → App access) δώσε email + password.
-4. Φτιάξε από πριν 1–2 φίλους/εξόδους σε αυτόν τον λογαριασμό ώστε ο ελεγκτής να δει την εφαρμογή «ζωντανή».
+2. Στα στοιχεία ελέγχου (App Store Connect → App Review Information / Play Console → App access) δώσε email + password.
+3. Φτιάξε από πριν 1–2 φίλους/εξόδους σε αυτόν τον λογαριασμό ώστε ο ελεγκτής να δει την εφαρμογή «ζωντανή».
 
 ## 5. Πολιτική απορρήτου: δημόσιο URL
 

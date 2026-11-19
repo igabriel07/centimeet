@@ -11,7 +11,7 @@
 export const palette = {
   light: {
     /** Φόντο οθονών */
-    bg: '#F7F6F2',
+    bg: '#fbfbfb',
     /** Κάρτες, πεδία, tab bar */
     card: '#FFFFFF',
     text: '#1B1B1F',
@@ -19,7 +19,7 @@ export const palette = {
     muted: '#6B6B76',
     border: '#E4E2DC',
     /** Χρώμα της μάρκας: κουμπιά, επιλεγμένα chips, links */
-    primary: '#E4572E',
+    primary: '#1c83b7',
     /** Κείμενο πάνω στο primary */
     primaryText: '#FFFFFF',
     /** Θετικό (✓ δήλωσε, score) */
@@ -40,14 +40,15 @@ export const palette = {
     text: '#F2F2F4',
     muted: '#A0A0AA',
     border: '#2C2C32',
-    primary: '#FF6B3D',
+    /** Το μπλε της μάρκας, λίγο φωτεινότερο για να ξεχωρίζει στο σκούρο φόντο */
+    primary: '#2A8FC4',
     primaryText: '#FFFFFF',
     good: '#44C07A',
     warn: '#FFB74D',
     danger: '#EF5350',
     chip: '#2A2A30',
     person: '#6C93F0',
-    venue: '#FF6B3D',
+    venue: '#E4572E',
   },
 } as const;
 

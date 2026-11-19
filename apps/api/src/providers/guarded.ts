@@ -6,9 +6,10 @@
  *  - parking → μόνο OpenStreetMap
  * Αν το Google αποτύχει (π.χ. quota από την κονσόλα), πάλι εφεδρική πηγή αντί για σφάλμα.
  */
-import type { Activity, LatLng, ParkingOption, TransportMode, Venue } from '@centimeet/shared';
+import type { ActivityCategory, LatLng, ParkingOption, TransportMode, Venue, VenueActivity } from '@centimeet/shared';
 import type { Cache } from '../lib/cache';
 import type { GoogleSku, UsageGuard } from '../lib/usage';
+import { usesTextSearch } from './categories';
 import { EstimateRouting } from './estimate';
 import { routesTier, type GoogleProvider } from './google';
 import { osmParking, osmVenues } from './osm';
@@ -63,13 +64,13 @@ export class GuardedProvider implements PlacesProvider, RoutingProvider {
 
   // ---------- Places ----------
 
-  searchVenues(center: LatLng, activity: Activity, radiusM: number, max: number): Promise<Venue[]> {
+  searchVenues(center: LatLng, activity: VenueActivity, radiusM: number, max: number, category?: ActivityCategory): Promise<Venue[]> {
     return this.withBudget(
-      'places_search',
+      usesTextSearch(activity, category) ? 'text_search' : 'places_search',
       1,
-      () => this.google.searchVenues(center, activity, radiusM, max),
+      () => this.google.searchVenues(center, activity, radiusM, max, category),
       async () => {
-        const venues = await osmVenues(center, activity, radiusM, this.cache, this.fetchImpl).catch(() => []);
+        const venues = await osmVenues(center, activity, radiusM, this.cache, this.fetchImpl, category).catch(() => []);
         await Promise.all(venues.map((v) => this.cache.set(`venue:${v.id}`, v, 60 * 60)));
         return venues;
       },

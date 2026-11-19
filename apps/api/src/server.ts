@@ -1,6 +1,15 @@
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
-import { AreaVenuesRequestSchema, CITY_CONFIG, SuggestRequestSchema, VenuePlanRequestSchema, CITIES } from '@centimeet/shared';
+import {
+  AreaVenuesRequestSchema,
+  CITY_CONFIG,
+  PopularVenuesRequestSchema,
+  rankPopular,
+  SuggestRequestSchema,
+  VenuePlanRequestSchema,
+  CITIES,
+  type PopularVenuesResponse,
+} from '@centimeet/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Env } from './env';
@@ -9,7 +18,7 @@ import { ENGINE_PROFILES } from './engine/config';
 import { areaVenues, suggest } from './engine/suggest';
 import { outOfServiceArea } from './engine/areas';
 import { makeAuthHook } from './lib/auth';
-import { MemoryCache, type Cache } from './lib/cache';
+import { cached, MemoryCache, type Cache } from './lib/cache';
 import { dayKey, defaultLimits, MemoryUsageStore, SupabaseUsageStore, UsageGuard, type UsageStore } from './lib/usage';
 import { GoogleProvider } from './providers/google';
 import { GuardedProvider } from './providers/guarded';
@@ -68,11 +77,16 @@ export function buildProviders(
   };
 }
 
+/** Ακτίνα αναζήτησης δημοφιλών γύρω από το κέντρο της πόλης */
+const POPULAR_RADIUS_M = 4000;
+
 export function buildServer(env: Env, overrides?: { providers?: Providers; usage?: UsageStore; now?: () => Date }) {
   const app = Fastify({
     logger: { level: process.env.NODE_ENV === 'test' ? 'silent' : 'info' },
     trustProxy: env.TRUST_PROXY,
     bodyLimit: 256 * 1024,
+    // Τα ids του Photon κουβαλούν την ετικέτα (base64) → για ελληνικές διευθύνσεις ξεπερνούν το 100 (προεπιλογή)
+    routerOptions: { maxParamLength: 1024 },
   });
 
   // Εσωτερικά σφάλματα (π.χ. από Google) δεν φτάνουν στον χρήστη — μόνο στα logs
@@ -124,7 +138,7 @@ export function buildServer(env: Env, overrides?: { providers?: Providers; usage
     if (outside.length) {
       return reply.code(422).send({
         error: 'out_of_service_area',
-        message: `Εκτός ${CITY_CONFIG[parsed.data.city].label}: ${outside.map((p) => p.name).join(', ')}`,
+        message: `Εκτός ${CITY_CONFIG[parsed.data.city].region.label}: ${outside.map((p) => p.name).join(', ')}`,
       });
     }
     if (!(await dailyLimit(req, reply))) return reply;
@@ -168,6 +182,24 @@ export function buildServer(env: Env, overrides?: { providers?: Providers; usage
       req.log.warn({ err: e }, 'autocomplete failed');
       return reply.code(502).send({ error: 'geocoder_unavailable' });
     }
+  });
+
+  /**
+   * «Διαλέγω εγώ το μέρος»: δημοφιλή μαγαζιά της κατηγορίας στην πόλη (γύρω από το κέντρο).
+   * Ίδια λίστα για όλους → cache 6 ωρών (μία κλήση Google ανά πόλη/κατηγορία, όχι ανά χρήστη).
+   */
+  app.get('/v1/places/popular', async (req, reply) => {
+    const parsed = PopularVenuesRequestSchema.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', issues: parsed.error.issues });
+    const { city, activity, category } = parsed.data;
+    const key = `popular:${city}:${activity}:${category ?? '*'}`;
+    const hit = await cache.get<PopularVenuesResponse>(key);
+    if (hit) return hit;
+    if (!(await dailyLimit(req, reply, 'areas'))) return reply;
+    return cached(cache, key, 6 * 3600, async (): Promise<PopularVenuesResponse> => {
+      const list = await providers.places.searchVenues(CITY_CONFIG[city].center, activity, POPULAR_RADIUS_M, 20, category);
+      return { venues: rankPopular(list) };
+    });
   });
 
   /** Pin στον χάρτη / «η τοποθεσία μου» → διεύθυνση */

@@ -14,12 +14,16 @@
  */
 import {
   CITY_CONFIG,
+  compareSpotKeys,
   crowdHint,
   estimateMinutes,
   haversineKm,
   isOpenAt,
+  isVenueActivity,
   pointFairnessCost,
+  preferenceWeight,
   rankVenuesByQuality,
+  spotRankKey,
   travelStats,
   walkMinutes,
   type AreaVenuesRequest,
@@ -33,6 +37,7 @@ import {
   type SuggestionsResponse,
   type TransportMode,
   type TravelEstimate,
+  type VenueActivity,
   type Venue,
 } from '@centimeet/shared';
 import type { MatrixCell, Providers, RouteTiming } from '../providers/types';
@@ -72,24 +77,35 @@ export async function suggest(req: SuggestRequest, providers: Providers, opts: S
   // 2. Πραγματικοί χρόνοι
   const { travel, estimated } = await travelToPoints(req, candidates, providers, meetAt, config);
 
+  const notices: ResultNotices = estimated ? { estimatedTimes: true } : {};
+  // «Πού θέλεις να πάμε;»: βάρος ανά άτομο (ίδια σειρά με το travel)
+  const weights = req.participants.map((p) => preferenceWeight(p.preference));
+
+  // «Σημείο»: μόνο σημείο συνάντησης, κατάταξη απόσταση → χρόνος → κόστος, χωρίς μαγαζιά
+  if (!isVenueActivity(req.activity)) {
+    const spots = candidates
+      .filter((c) => travel.has(c.id))
+      .map((c) => ({ c, travel: travel.get(c.id)!, key: spotRankKey(travel.get(c.id)!, undefined, weights) }))
+      .sort((a, b) => compareSpotKeys(a.key, b.key));
+    const areas = pickSeparated(spots).map((p, i) => toArea(i === 0 ? 'primary' : p.c.id, p.c, p.travel, i === 0, 0, false));
+    return { areas, primary: [], alternatives: [], notices };
+  }
+
+  const activity = req.activity;
+
   // 3. Δίκαιο σημείο + εναλλακτικά σε άλλες περιοχές
   const ranked = candidates
     .filter((c) => travel.has(c.id))
-    .map((c) => ({ c, travel: travel.get(c.id)!, cost: pointFairnessCost(travel.get(c.id)!) }))
+    .map((c) => ({ c, travel: travel.get(c.id)!, cost: pointFairnessCost(travel.get(c.id)!, undefined, weights) }))
     .sort((a, b) => a.cost - b.cost);
-  const picks: typeof ranked = [];
-  for (const r of ranked) {
-    if (picks.length > SEARCH.alternatives) break;
-    if (picks.every((p) => haversineKm(p.c.center, r.c.center) >= CANDIDATES.altMinSeparationKm)) picks.push(r);
-  }
-  const notices: ResultNotices = estimated ? { estimatedTimes: true } : {};
+  const picks = pickSeparated(ranked);
   if (picks.length === 0) return { areas: [], primary: [], alternatives: [], notices };
 
   // 4–5. Μαγαζιά: το κύριο πάντα· τα εναλλακτικά αμέσως ή «κατά παραγγελία»
   const withVenues = picks.map((_, i) => i === 0 || config.alternativesWithVenues);
   const found = await Promise.all(
     picks.map((p, i) =>
-      withVenues[i] ? findVenues(providers, p.c.center, req, at, i === 0 ? config.primaryRadiiM : config.altRadiiM) : null,
+      withVenues[i] ? findVenues(providers, p.c.center, req, activity, at, i === 0 ? config.primaryRadiiM : config.altRadiiM) : null,
     ),
   );
 
@@ -109,12 +125,25 @@ export async function suggest(req: SuggestRequest, providers: Providers, opts: S
   return { areas, primary: perArea[0] ?? [], alternatives: perArea.slice(1).flat(), notices };
 }
 
+/** Το καλύτερο σημείο + εναλλακτικά που απέχουν αρκετά μεταξύ τους (άλλη περιοχή) */
+function pickSeparated<T extends { c: CandidatePoint }>(ranked: T[]): T[] {
+  const picks: T[] = [];
+  for (const r of ranked) {
+    if (picks.length > SEARCH.alternatives) break;
+    if (picks.every((p) => haversineKm(p.c.center, r.c.center) >= CANDIDATES.altMinSeparationKm)) picks.push(r);
+  }
+  return picks;
+}
+
 /** «Δες μαγαζιά εδώ»: μαγαζιά για μια εναλλακτική περιοχή που ήρθε χωρίς μαγαζιά */
 export async function areaVenues(req: AreaVenuesRequest, providers: Providers, opts: SuggestOptions = {}): Promise<AreaVenuesResponse> {
   const config = opts.config ?? ENGINE_PROFILES.growth;
   const at = req.departAt ? new Date(req.departAt) : (opts.now ?? new Date());
   const exclude = new Set(req.excludeIds ?? []);
-  const found = await findVenues(providers, req.area.center, req, at, config.altRadiiM);
+  if (!isVenueActivity(req.activity)) {
+    return { area: toArea(req.area.id, req.area, req.area.travel, false, 0, false), venues: [], notices: {} };
+  }
+  const found = await findVenues(providers, req.area.center, req, req.activity, at, config.altRadiiM);
   const area = toArea(req.area.id, req.area, req.area.travel, false, found.radiusM, true);
   const venues = found.venues.filter((v) => !exclude.has(v.id));
   return {
@@ -250,13 +279,14 @@ async function findVenues(
   providers: Providers,
   center: LatLng,
   req: SuggestRequest,
+  activity: VenueActivity,
   at: Date,
   radii: readonly number[],
 ): Promise<{ venues: Venue[]; radiusM: number }> {
   const tz = CITY_CONFIG[req.city].timeZone;
   let last: { venues: Venue[]; radiusM: number } = { venues: [], radiusM: radii[0] ?? 300 };
   for (const radiusM of radii) {
-    const list = await providers.places.searchVenues(center, req.activity, radiusM, 20);
+    const list = await providers.places.searchVenues(center, activity, radiusM, 20, req.category);
     last = { venues: list.filter((v) => passesFilters(v, req.filters, at, tz)), radiusM };
     if (last.venues.length >= SEARCH.minVenues) break;
   }

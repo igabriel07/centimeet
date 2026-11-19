@@ -30,7 +30,9 @@ let currentToken: string | null = null;
 /** Ζητά άδεια και καταχωρεί τη συσκευή. Επιστρέφει το token ή null (χωρίς άδεια / εξομοιωτής / χωρίς project id). */
 export async function registerForPush(): Promise<string | null> {
   try {
-    if (!supabaseConfigured || !Device.isDevice) return null;
+    // Όχι στον browser ούτε στο Expo Go (δεν υποστηρίζουν push) — μόνο σε πραγματικό build.
+    if (!supabaseConfigured || !Device.isDevice || Platform.OS === 'web') return null;
+    if (Constants.executionEnvironment === 'storeClient') return null;
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('default', {
         name: 'Έξοδοι & μηνύματα',
@@ -77,4 +79,13 @@ export function useNotificationRouting(enabled: boolean) {
     const sub = Notifications.addNotificationResponseReceivedListener(openFrom);
     return () => sub.remove();
   }, [enabled]);
+}
+
+/** Ήρθε ειδοποίηση με την εφαρμογή ανοιχτή (π.χ. νέα πρόσκληση) → ανανέωση */
+export function useInviteRefresh(enabled: boolean, refresh: () => void) {
+  useEffect(() => {
+    if (!enabled || Platform.OS === 'web') return;
+    const sub = Notifications.addNotificationReceivedListener(() => refresh());
+    return () => sub.remove();
+  }, [enabled, refresh]);
 }

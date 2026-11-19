@@ -11,32 +11,48 @@ import {
   estimateMinutes,
   haversineKm,
   walkMinutes,
-  type Activity,
+  type ActivityCategory,
   type LatLng,
   type OpeningPeriod,
   type ParkingOption,
   type TransportMode,
   type Venue,
+  type VenueActivity,
 } from '@centimeet/shared';
 import type { MatrixCell, PlacesProvider, RouteTiming, RoutingProvider } from './types';
 
-const NAMES: Record<Activity, string[]> = {
+const NAMES: Record<VenueActivity, string[]> = {
   coffee: ['Café Μέση', 'Κόκκος', 'Άρωμα', 'Το Μπαλκόνι', 'Flat White', 'Ρόφημα', 'Μπρίκι', 'Espresso Lab'],
   food: ['Ταβέρνα Η Μέση', 'Μεζεδοπωλείο', 'Το Στέκι', 'Ψησταριά', 'Τρατορία', 'Ουζερί', 'Μαγειρείο', 'Σουβλάκι'],
   drinks: ['Bar Κέντρο', 'Αυλή', 'Ταράτσα', 'Speakeasy', 'Κρασοπουλειό', 'Pub', 'Cocktail Room', 'Μπυραρία'],
   cinema: ['Σινεμά Αστέρι', 'Θερινός Κήπος', 'Cineplex Μέσης', 'Studio'],
-  dessert: ['Ζαχαροπλαστείο', 'Gelato', 'Λουκουμάδες', 'Cake Shop'],
-  brunch: ['Brunch Club', 'Pancake Spot', 'Πρωινό', 'Eggs & Co'],
+  theater: ['Θέατρο Μέσης', 'Σκηνή Κέντρο', 'Θέατρο Αυλαία', 'Black Box'],
+};
+
+/** Ονόματα ανά κατηγορία (όπου λείπουν: της δραστηριότητας με την κατηγορία δίπλα) */
+const CATEGORY_NAMES: Partial<Record<ActivityCategory, string[]>> = {
+  pizza: ['Pizza Napoli', 'Πιτσαρία Η Γωνιά', 'Forno', 'Slice', 'La Pizza', 'Πίτσα Μέσης'],
+  souvlaki: ['Σουβλάκι Ο Κώστας', 'Γυράδικο', 'Καλαμάκι Μέσης', 'Το Σουβλατζίδικο', 'Πίτα Γύρος', 'Ψησταριά Ο Θανάσης'],
+  burger: ['Burger Joint', 'Smash', 'Grill House', 'Burger Μέσης'],
+  taverna: ['Ταβέρνα Η Μέση', 'Μεζεδοπωλείο', 'Το Στέκι', 'Ουζερί'],
+  sushi: ['Sushi Bar', 'Tokyo', 'Maki House', 'Sakura'],
+  cocktail: ['Cocktail Room', 'Speakeasy', 'Mixology', 'The Bar'],
+  wine: ['Κρασοπουλειό', 'Wine Bar', 'Οινοθήκη', 'Vino'],
+  icecream: ['Gelato', 'Παγωτό Μέσης', 'Scoop', 'Ice Bar'],
+  loukoumades: ['Λουκουμάδες Μέσης', 'Λουκουμ', 'Χρυσές Μπουκιές'],
+  bougatsa: ['Μπουγάτσα Μέσης', 'Μπουγατσατζίδικο', 'Η Σερραϊκή', 'Μπουγάτσα Κρέμα'],
+  brunch: ['Brunch Club', 'Eggs & Co', 'Sunday Table'],
+  pastry: ['Ζαχαροπλαστείο', 'Cake Shop', 'Γλυκά Μέσης'],
+  standup: ['Comedy Club', 'Stand-up Stage', 'Γέλιο Live'],
 };
 
 /** Ωράρια ανά είδος: [άνοιγμα, κλείσιμο] — κλείσιμο < άνοιγμα = την επόμενη μέρα */
-const HOURS: Record<Activity, [number, number]> = {
+const HOURS: Record<VenueActivity, [number, number]> = {
   coffee: [8, 23],
-  brunch: [9, 17],
   food: [12, 1],
   drinks: [19, 3],
-  dessert: [10, 24],
   cinema: [17, 1],
+  theater: [18, 24],
 };
 
 /** Μαγαζιά που «υπάρχουν» σε ακτίνα 1 km γύρω από κάθε σημείο του πλέγματος */
@@ -49,7 +65,7 @@ function seeded(n: number) {
   return x - Math.floor(x);
 }
 
-function periods(activity: Activity, variant: number): OpeningPeriod[] {
+function periods(activity: VenueActivity, variant: number): OpeningPeriod[] {
   let [open, close] = HOURS[activity];
   if (variant === 1 && open < 15) close = 17; // κλείνει νωρίς (μόνο για όσα ανοίγουν πρωί)
   const days = variant === 2 ? [0, 2, 3, 4, 5, 6] : [0, 1, 2, 3, 4, 5, 6]; // κλειστό Δευτέρα
@@ -73,11 +89,13 @@ function trafficFactor(at?: Date) {
 export class MockProvider implements PlacesProvider, RoutingProvider {
   private venues = new Map<string, Venue>();
 
-  async searchVenues(center: LatLng, activity: Activity, radiusM: number, max: number): Promise<Venue[]> {
+  async searchVenues(center: LatLng, activity: VenueActivity, radiusM: number, max: number, category?: ActivityCategory): Promise<Venue[]> {
     // Σταθερή «γειτονιά» ανά ~100 m ώστε μικρές μετακινήσεις του κέντρου να δίνουν ίδια μαγαζιά
-    const base = Math.round(center.lat * 1000) * 7 + Math.round(center.lng * 1000) * 13;
+    const salt = category ? [...category].reduce((a, ch) => a + ch.charCodeAt(0), 0) * 101 : 0;
+    const base = Math.round(center.lat * 1000) * 7 + Math.round(center.lng * 1000) * 13 + salt;
     const anchor = { lat: Math.round(center.lat * 1000) / 1000, lng: Math.round(center.lng * 1000) / 1000 };
-    const names = NAMES[activity];
+    const names = category ? (CATEGORY_NAMES[category] ?? NAMES[activity].map((n) => `${n} (${category})`)) : NAMES[activity];
+    const kind = category ? `${activity}-${category}` : activity;
     const all: Venue[] = [];
     for (let i = 0; i < GRID_VENUES; i++) {
       const dist = GRID_RADIUS_M * Math.sqrt(seeded(base + i)); // ομοιόμορφα στην επιφάνεια
@@ -89,7 +107,7 @@ export class MockProvider implements PlacesProvider, RoutingProvider {
       const ratingCount = Math.round(5 + seeded(base + i + 13) ** 2 * 4000);
       const variantRoll = seeded(base + i + 31);
       const v: Venue = {
-        id: `mock_${activity}_${base}_${i}`,
+        id: `mock_${kind}_${base}_${i}`,
         name: `${names[i % names.length]}${i >= names.length ? ` ${Math.floor(i / names.length) + 1}` : ''}`,
         address: 'Δοκιμαστική οδός 1',
         location,

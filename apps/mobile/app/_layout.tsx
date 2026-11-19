@@ -49,6 +49,10 @@ function RootStack() {
     >
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen name="(auth)/sign-in" options={{ headerShown: false }} />
+      <Stack.Screen name="(auth)/sign-up" options={{ headerShown: false }} />
+      <Stack.Screen name="(auth)/forgot-password" options={{ headerShown: false }} />
+      <Stack.Screen name="(auth)/email-code" options={{ headerShown: false }} />
+      <Stack.Screen name="auth-callback" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="outing/new" options={{ title: t('wizard.newOuting') }} />
       <Stack.Screen name="outing/[id]" options={{ title: '' }} />
@@ -56,6 +60,8 @@ function RootStack() {
       <Stack.Screen name="outing/venue/[venueId]" options={{ title: '' }} />
       <Stack.Screen name="chat/[conversationId]" options={{ title: t('messages.title') }} />
       <Stack.Screen name="legal/[doc]" options={{ title: '' }} />
+      <Stack.Screen name="history" options={{ title: t('history.title') }} />
+      <Stack.Screen name="places" options={{ title: t('saved.title') }} />
     </Stack>
   );
 }

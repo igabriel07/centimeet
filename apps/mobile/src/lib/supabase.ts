@@ -4,6 +4,8 @@ import { AppState, Platform } from 'react-native';
 
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+export const supabaseUrl = url;
+export const supabaseAnonKey = anonKey;
 
 export const supabaseConfigured = Boolean(url && anonKey);
 
@@ -12,7 +14,10 @@ export const supabase = createClient(url || 'http://localhost', anonKey || 'miss
     storage: AsyncStorage,
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: false,
+    // PKCE: το Google επιστρέφει ?code=… που ανταλλάσσεται με session (βλ. lib/oauth.ts).
+    flowType: 'pkce',
+    // Στον browser το Supabase διαβάζει μόνο του το ?code= μετά την επιστροφή από το Google.
+    detectSessionInUrl: Platform.OS === 'web',
   },
 });
 

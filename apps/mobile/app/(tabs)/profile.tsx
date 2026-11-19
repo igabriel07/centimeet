@@ -1,5 +1,5 @@
 import Constants from 'expo-constants';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -7,34 +7,22 @@ import { Alert, ScrollView, View } from 'react-native';
 import { Body, Button, Card, H1, Label, Screen } from '@/components/ui';
 import { APP_INFO } from '@/legal/content';
 import { useAuth } from '@/lib/auth';
+import { useMyProfile } from '@/lib/profile';
 import { errorMessage } from '@/lib/outings';
 import { unregisterPush } from '@/lib/push';
 import { supabase } from '@/lib/supabase';
+import { useSignOut } from '@/lib/useSignOut';
 
 export default function Profile() {
   const { t } = useTranslation();
-  const { session, setGuest } = useAuth();
+  const { session } = useAuth();
   const qc = useQueryClient();
   const me = session?.user.id;
   const [deleting, setDeleting] = useState(false);
 
-  const profile = useQuery({
-    queryKey: ['profile', me],
-    enabled: !!me,
-    queryFn: async () => {
-      const { data, error } = await supabase.from('profiles').select('username, display_name').eq('id', me!).single();
-      if (error) throw error;
-      return data as { username: string; display_name: string };
-    },
-  });
+  const profile = useMyProfile();
 
-  async function signOut() {
-    await unregisterPush().catch(() => {});
-    setGuest(false);
-    await supabase.auth.signOut();
-    qc.clear();
-    router.replace('/(auth)/sign-in');
-  }
+  const signOut = useSignOut();
 
   /** Απαιτείται από App Store & Google Play: οριστική διαγραφή μέσα από την εφαρμογή */
   function confirmDelete() {
@@ -73,6 +61,12 @@ export default function Profile() {
         <View style={{ marginTop: 24 }}>
           <Button variant="secondary" title={t('profile.signOut')} onPress={signOut} />
         </View>
+
+        {me ? (
+          <Card onPress={() => router.push('/places')} style={{ marginTop: 16 }}>
+            <Body>⭐ {t('saved.title')}</Body>
+          </Card>
+        ) : null}
 
         <Label>{t('profile.about')}</Label>
         <Card onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'privacy' } })}>

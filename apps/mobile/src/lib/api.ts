@@ -9,6 +9,7 @@ import type {
   LatLng,
   PlaceSuggestion,
   ResolvedPlace,
+  PopularVenuesResponse,
 } from '@centimeet/shared';
 import i18n from '@/i18n';
 import { supabase } from './supabase';
@@ -85,6 +86,10 @@ export const api = {
     }),
   resolvePlace: (placeId: string, session: string) =>
     request<ResolvedPlace>(`/v1/places/${encodeURIComponent(placeId)}?session=${session}`),
+  popularVenues: (q: { city: string; activity: string; category?: string }) =>
+    request<PopularVenuesResponse>(
+      `/v1/places/popular?city=${q.city}&activity=${q.activity}${q.category ? `&category=${q.category}` : ''}`,
+    ),
   reverse: (loc: LatLng, signal?: AbortSignal) =>
     request<ResolvedPlace>(`/v1/places/reverse?lat=${loc.lat}&lng=${loc.lng}`, { signal }),
 };

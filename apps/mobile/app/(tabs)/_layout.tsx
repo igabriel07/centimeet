@@ -30,10 +30,12 @@ export default function TabsLayout() {
         sceneStyle: { backgroundColor: c.bg },
       }}
     >
-      <Tabs.Screen name="index" options={{ title: t('tabs.outings'), tabBarIcon: icon('location-outline', 'location') }} />
-      <Tabs.Screen name="friends" options={{ title: t('tabs.friends'), tabBarIcon: icon('people-outline', 'people') }} />
+      <Tabs.Screen name="index" options={{ headerShown: false, title: t('tabs.outings'), tabBarIcon: icon('location-outline', 'location') }} />
       <Tabs.Screen name="messages" options={{ title: t('tabs.messages'), tabBarIcon: icon('chatbubbles-outline', 'chatbubbles') }} />
-      <Tabs.Screen name="profile" options={{ title: t('tabs.profile'), tabBarIcon: icon('person-circle-outline', 'person-circle') }} />
+      <Tabs.Screen name="friends" options={{ title: t('tabs.friends'), tabBarIcon: icon('people-outline', 'people') }} />
+      {/* Όχι στην κάτω μπάρα: ανοίγει από το εικονίδιο προφίλ (πάνω δεξιά) και το μενού ☰.
+          (Όχι href: null — έτσι η διαδρομή /profile σταματά να ανοίγει.) */}
+      <Tabs.Screen name="profile" options={{ title: t('tabs.profile'), tabBarButton: () => null, tabBarItemStyle: { display: 'none' } }} />
     </Tabs>
   );
 }

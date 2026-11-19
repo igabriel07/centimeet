@@ -3,7 +3,8 @@
  *  - parking (συμπληρώνει το Google με πληροφορία δημόσιο/ιδιωτικό/υπόγειο)
  *  - μαγαζιά ως εφεδρική πηγή όταν εξαντληθεί το δωρεάν όριο του Google (χωρίς βαθμολογίες)
  */
-import type { Activity, LatLng, ParkingOption, Venue } from '@centimeet/shared';
+import type { ActivityCategory, LatLng, ParkingOption, Venue, VenueActivity } from '@centimeet/shared';
+import { ACTIVITY_OSM, CATEGORY_OSM } from './categories';
 import { cached, geoKey, type Cache } from '../lib/cache';
 import { walkMinutes } from '@centimeet/shared';
 
@@ -88,28 +89,36 @@ export function mergeParking(lists: ParkingOption[][], limit = 5): ParkingOption
   return out;
 }
 
-/** Ετικέτες OSM ανά δραστηριότητα */
-const OSM_FILTERS: Record<Activity, string[]> = {
-  coffee: ['[amenity=cafe]'],
-  food: ['[amenity=restaurant]', '[amenity=fast_food]'],
-  drinks: ['[amenity=bar]', '[amenity=pub]'],
-  cinema: ['[amenity=cinema]'],
-  dessert: ['[shop=pastry]', '[amenity=ice_cream]', '[shop=confectionery]'],
-  brunch: ['[amenity=cafe]', '[amenity=restaurant]'],
-};
 
 /** Μαγαζιά από OSM (εφεδρικά): όνομα, θέση, τηλέφωνο — χωρίς βαθμολογίες/ωράρια */
 export async function osmVenues(
   center: LatLng,
-  activity: Activity,
+  activity: VenueActivity,
   radiusM: number,
   cache: Cache,
   fetchImpl: typeof fetch = fetch,
+  category?: ActivityCategory,
 ): Promise<Venue[]> {
-  const key = `venues:osm:${activity}:${geoKey(center.lat, center.lng)}:${radiusM}`;
+  if (category) {
+    // Οι ετικέτες cuisine κ.λπ. λείπουν συχνά στο OSM → αν η κατηγορία δεν βρει τίποτα, όλη η δραστηριότητα
+    const byCategory = await overpassVenues(center, CATEGORY_OSM[category], `${activity}:${category}`, radiusM, cache, fetchImpl);
+    if (byCategory.length > 0) return byCategory;
+  }
+  return overpassVenues(center, ACTIVITY_OSM[activity], activity, radiusM, cache, fetchImpl);
+}
+
+async function overpassVenues(
+  center: LatLng,
+  filters: string[],
+  cacheTag: string,
+  radiusM: number,
+  cache: Cache,
+  fetchImpl: typeof fetch,
+): Promise<Venue[]> {
+  const key = `venues:osm:${cacheTag}:${geoKey(center.lat, center.lng)}:${radiusM}`;
   return cached(cache, key, 24 * 60 * 60, async () => {
     const around = `(around:${radiusM},${center.lat},${center.lng})`;
-    const q = `[out:json][timeout:10];(${OSM_FILTERS[activity].map((f) => `nwr${around}${f}[name];`).join('')});out center 30;`;
+    const q = `[out:json][timeout:10];(${filters.map((f) => `nwr${around}${f}[name];`).join('')});out center 30;`;
     const res = await fetchImpl(OVERPASS, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'CentiMeet/0.1' },
